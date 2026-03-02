@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Build extension
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Test extension
+        run: |
+          set -euo pipefail
+          npm test
+          xvfb-run -a npm run test:e2e
