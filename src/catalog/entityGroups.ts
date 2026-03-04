@@ -239,25 +239,47 @@ const CRONJOB_ROOT_KEYS = [
   ...JOB_TEMPLATE_ROOT_KEYS,
 ] as const;
 
+const STANDALONE_SERVICE_ROOT_KEYS = [
+  "selector",
+  "type",
+  "ports",
+  "headless",
+  "clusterIP",
+  "clusterIPs",
+  "externalIPs",
+  "ipFamilies",
+  "ipFamilyPolicy",
+  "externalName",
+  "externalTrafficPolicy",
+  "internalTrafficPolicy",
+  "loadBalancerClass",
+  "loadBalancerIP",
+  "loadBalancerSourceRanges",
+  "healthCheckNodePort",
+  "sessionAffinity",
+  "sessionAffinityConfig",
+  "publishNotReadyAddresses",
+  "allocateLoadBalancerNodePorts",
+  "extraSpec",
+] as const;
+
+const INGRESS_ROOT_KEYS = [
+  "class",
+  "host",
+  "paths",
+  "tls",
+  "ingressClassName",
+  "dexAuth",
+  "extraSpec",
+] as const;
+
 const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> = {
   "apps-stateless": DEPLOYMENT_WORKLOAD_ROOT_KEYS,
   "apps-stateful": STATEFUL_WORKLOAD_ROOT_KEYS,
   "apps-jobs": JOB_TEMPLATE_ROOT_KEYS,
   "apps-cronjobs": CRONJOB_ROOT_KEYS,
-  "apps-services": ["selector", "type", "ports", "headless", "annotations"],
-  "apps-ingresses": [
-    "class",
-    "host",
-    "hosts",
-    "paths",
-    "tls",
-    "ingressClassName",
-    "service",
-    "servicePort",
-    "dexAuth",
-    "sendAuthorizationHeader",
-    "annotations",
-  ],
+  "apps-services": STANDALONE_SERVICE_ROOT_KEYS,
+  "apps-ingresses": INGRESS_ROOT_KEYS,
   "apps-network-policies": [
     "type",
     "apiVersion",

@@ -163,11 +163,11 @@ apps-routes:
     type:
       _default: apps-ingresses
   ui:
-    servicePort: 8080
+    host: ui.example.local
 `;
-  const doc = findFieldDoc(["apps-routes", "ui", "servicePort"], { documentText: yaml });
+  const doc = findFieldDoc(["apps-routes", "ui", "host"], { documentText: yaml });
   assert.ok(doc);
-  assert.equal(doc?.title, "Ingress Backend Service Port");
+  assert.equal(doc?.title, "Ingress Host");
 });
 
 test("path-specific service type doc overrides generic type", () => {
@@ -228,10 +228,22 @@ test("path-specific network policy type doc overrides generic type", () => {
   assert.equal(doc?.title, "Network Policy Renderer Type");
 });
 
-test("ingress backend service port has explicit context doc", () => {
-  const servicePortDoc = findFieldDoc(["apps-ingresses", "api", "servicePort"]);
-  assert.ok(servicePortDoc);
-  assert.equal(servicePortDoc?.title, "Ingress Backend Service Port");
+test("ingress tls secret name has explicit context doc", () => {
+  const tlsSecretDoc = findFieldDoc(["apps-ingresses", "api", "tls", "secret_name"]);
+  assert.ok(tlsSecretDoc);
+  assert.equal(tlsSecretDoc?.title, "Ingress TLS Secret Name");
+});
+
+test("legacy ingress servicePort is marked as unusual for current contract", () => {
+  const doc = findFieldDoc(["apps-ingresses", "api", "servicePort"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
+});
+
+test("standalone service clusterIP has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-services", "api-svc", "clusterIP"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Service ClusterIP");
 });
 
 test("dex authenticator session field has explicit context doc", () => {

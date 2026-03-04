@@ -35,7 +35,14 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-ingresses",
-    mustContain: ["    _include: [\"apps-ingresses-defaultIngress\"]", "    ingressClassName: nginx", "    paths: |-", "    tls:"],
+    mustContain: [
+      "    _include: [\"apps-ingresses-defaultIngress\"]",
+      "    ingressClassName: nginx",
+      "    paths: |-",
+      "            name: app-service",
+      "              number: 80",
+      "    tls:",
+    ],
   },
   {
     group: "apps-network-policies",
