@@ -172,6 +172,24 @@ test("path-specific network policy type doc overrides generic type", () => {
   assert.equal(doc?.title, "Network Policy Renderer Type");
 });
 
+test("dex authenticator session field has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-dex-authenticators", "auth-main", "keepUsersLoggedInFor"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Dex Session Lifetime");
+});
+
+test("dex authenticator sign-out field has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-dex-authenticators", "auth-main", "signOutURL"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Dex Sign-out URL");
+});
+
+test("dex authenticator source-range field has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-dex-authenticators", "auth-main", "whitelistSourceRanges"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Dex Authenticator Source CIDR Allowlist");
+});
+
 test("service-account namespace has explicit context doc", () => {
   const doc = findFieldDoc(["apps-service-accounts", "runtime", "namespace"]);
   assert.ok(doc);

@@ -73,6 +73,13 @@ test("root-key allowlist is non-empty only for app-entry groups", () => {
   assert.equal(infra.size, 0);
 });
 
+test("dex authenticator root-key allowlist covers session and source-range settings", () => {
+  const dexAuth = getAllowedAppRootKeysByGroup("apps-dex-authenticators");
+  assert.ok(dexAuth.has("keepUsersLoggedInFor"));
+  assert.ok(dexAuth.has("signOutURL"));
+  assert.ok(dexAuth.has("whitelistSourceRanges"));
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");

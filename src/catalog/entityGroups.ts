@@ -225,6 +225,8 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
     "applicationIngressClassName",
     "applicationIngressCertificateSecretName",
     "allowedGroups",
+    "keepUsersLoggedInFor",
+    "signOutURL",
     "sendAuthorizationHeader",
     "whitelistSourceRanges",
     "nodeSelector",

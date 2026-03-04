@@ -147,7 +147,18 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-dex-authenticators": {
     purpose: "Declares dex-authenticator integration resources.",
     purposeRu: "Описывает ресурсы интеграции dex-authenticator.",
-    keys: ["applicationDomain", "applicationIngressClassName", "applicationIngressCertificateSecretName", "allowedGroups", "sendAuthorizationHeader", "nodeSelector", "tolerations"],
+    keys: [
+      "applicationDomain",
+      "applicationIngressClassName",
+      "applicationIngressCertificateSecretName",
+      "allowedGroups",
+      "keepUsersLoggedInFor",
+      "signOutURL",
+      "sendAuthorizationHeader",
+      "whitelistSourceRanges",
+      "nodeSelector",
+      "tolerations",
+    ],
   },
   "apps-custom-prometheus-rules": {
     purpose: "Declares custom Prometheus rule groups/alerts.",
@@ -267,7 +278,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     applicationIngressClassName: { en: "Ingress class for authenticator application route.", ru: "Ingress class для маршрута authenticator приложения." },
     applicationIngressCertificateSecretName: { en: "TLS secret for authenticator ingress.", ru: "TLS secret для ingress аутентификатора." },
     allowedGroups: { en: "Identity groups permitted to pass auth.", ru: "Группы identity, которым разрешен доступ." },
+    keepUsersLoggedInFor: { en: "Session lifetime for authenticated users.", ru: "Время жизни сессии для аутентифицированных пользователей." },
+    signOutURL: { en: "URL used by authenticator sign-out flow.", ru: "URL, используемый в sign-out потоке authenticator." },
     sendAuthorizationHeader: { en: "Forwards authorization header to upstream app.", ru: "Пробрасывает authorization header в upstream приложение." },
+    whitelistSourceRanges: { en: "Allowed source CIDR ranges for authenticator ingress.", ru: "Разрешенные source CIDR диапазоны для ingress authenticator." },
   },
   "apps-custom-prometheus-rules": {
     groups: { en: "Prometheus rule groups and alerts map.", ru: "Карта групп правил и алертов Prometheus." },
@@ -864,6 +878,48 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-dex-authenticators", "*", "keepUsersLoggedInFor"],
+    doc: {
+      title: "Dex Session Lifetime",
+      titleRu: "Время жизни Dex-сессии",
+      summary: "Duration users stay logged in before re-authentication is required.",
+      summaryRu: "Длительность, в течение которой пользователь остается залогинен без повторной аутентификации.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Use duration format supported by dex-authenticator (for example: `24h`, `168h`).",
+      ],
+      notesRu: [
+        "Используйте формат duration, поддерживаемый dex-authenticator (например: `24h`, `168h`).",
+      ],
+      example: "keepUsersLoggedInFor: 168h\n",
+    },
+  },
+  {
+    pattern: ["apps-dex-authenticators", "*", "signOutURL"],
+    doc: {
+      title: "Dex Sign-out URL",
+      titleRu: "URL выхода Dex",
+      summary: "URL users are redirected to on sign-out.",
+      summaryRu: "URL, на который пользователь перенаправляется при выходе.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "signOutURL: https://auth.example.local/sign_out\n",
+    },
+  },
+  {
+    pattern: ["apps-dex-authenticators", "*", "whitelistSourceRanges"],
+    doc: {
+      title: "Dex Authenticator Source CIDR Allowlist",
+      titleRu: "Allowlist source CIDR для Dex Authenticator",
+      summary: "Restricts authenticator ingress access to listed source CIDR ranges.",
+      summaryRu: "Ограничивает доступ к ingress authenticator указанными source CIDR диапазонами.",
+      type: "YAML block string | list | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "whitelistSourceRanges: |-\n  - 10.0.0.0/8\n  - 192.168.0.0/16\n",
+    },
+  },
+  {
     pattern: ["apps-custom-prometheus-rules", "*", "groups"],
     doc: {
       title: "Prometheus Rule Groups",
@@ -1429,7 +1485,13 @@ const RULES: DocRule[] = [
       summaryRu: "Выбирает режим рендеринга policy (профиль библиотеки для Kubernetes/Cilium вариантов).",
       type: "string",
       docsLink: "docs/reference-values.md#param-apps-sections",
-      example: "apps-network-policies:\n  deny-all:\n    type: defaultDeny\n",
+      notes: [
+        "Use `kubernetes` for standard Kubernetes NetworkPolicy rendering.",
+      ],
+      notesRu: [
+        "Используйте `kubernetes` для стандартного рендера Kubernetes NetworkPolicy.",
+      ],
+      example: "apps-network-policies:\n  deny-all:\n    type: kubernetes\n",
     },
   },
   {
@@ -2243,6 +2305,33 @@ const LAST_KEY_RULES: Record<string, FieldDoc> = {
     type: "bool | env-map",
     docsLink: "docs/reference-values.md#param-apps-sections",
     example: "sendAuthorizationHeader: true\n",
+  },
+  keepUsersLoggedInFor: {
+    title: "Session Lifetime",
+    titleRu: "Время жизни сессии",
+    summary: "Session duration before user re-authentication is required.",
+    summaryRu: "Длительность сессии до необходимости повторной аутентификации пользователя.",
+    type: "string | env-map",
+    docsLink: "docs/reference-values.md#param-apps-sections",
+    example: "keepUsersLoggedInFor: 168h\n",
+  },
+  signOutURL: {
+    title: "Sign-out URL",
+    titleRu: "URL выхода",
+    summary: "Endpoint used for user sign-out redirect.",
+    summaryRu: "Endpoint, используемый для редиректа при выходе пользователя.",
+    type: "string | env-map",
+    docsLink: "docs/reference-values.md#param-apps-sections",
+    example: "signOutURL: https://auth.example.local/sign_out\n",
+  },
+  whitelistSourceRanges: {
+    title: "Source CIDR Allowlist",
+    titleRu: "Allowlist source CIDR",
+    summary: "Restricts ingress access by source CIDR ranges.",
+    summaryRu: "Ограничивает доступ к ingress по source CIDR диапазонам.",
+    type: "YAML block string | list | env-map",
+    docsLink: "docs/reference-values.md#param-apps-sections",
+    example: "whitelistSourceRanges: |-\n  - 10.0.0.0/8\n  - 192.168.0.0/16\n",
   },
   containers: {
     title: "Containers Block",
