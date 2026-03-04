@@ -1,16 +1,6 @@
-export type EntityTemplateGroupType =
-  | "apps-stateless"
-  | "apps-stateful"
-  | "apps-jobs"
-  | "apps-cronjobs"
-  | "apps-services"
-  | "apps-ingresses"
-  | "apps-network-policies"
-  | "apps-configmaps"
-  | "apps-secrets"
-  | "apps-pvcs"
-  | "apps-service-accounts"
-  | "apps-k8s-manifests";
+import type { BuiltinGroupType } from "../catalog/entityGroups";
+
+export type EntityTemplateGroupType = Exclude<BuiltinGroupType, "apps-infra">;
 
 function withAppRoot(appName: string, bodyLines: string[]): string[] {
   return [`  ${appName}:`, ...bodyLines];
@@ -318,6 +308,138 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "        storage: 10Gi",
       ]);
 
+    case "apps-limit-range":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # Namespace resource policy limits",
+        "    limits: |-",
+        "      - type: Container",
+        "        default:",
+        "          cpu: 500m",
+        "          memory: 512Mi",
+        "        defaultRequest:",
+        "          cpu: 100m",
+        "          memory: 128Mi",
+      ]);
+
+    case "apps-certificates":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # cert-manager certificate template",
+        "    clusterIssuer: letsencrypt-prod",
+        "    host: app.example.local",
+        "    hosts: |-",
+        "      - app.example.local",
+      ]);
+
+    case "apps-dex-clients":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # OAuth client entry for Dex",
+        "    redirectURIs: |-",
+        "      - https://app.example.local/callback",
+      ]);
+
+    case "apps-dex-authenticators":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # Ingress auth helper based on DexAuthenticator",
+        "    applicationDomain: auth.example.local",
+        "    applicationIngressClassName: nginx",
+        "    applicationIngressCertificateSecretName: auth-example-local-tls",
+        "    allowedGroups: |-",
+        "      - platform-admins",
+        "      - devops",
+        "    sendAuthorizationHeader: true",
+        "    whitelistSourceRanges: |-",
+        "      - 10.0.0.0/8",
+        "      - 192.168.0.0/16",
+        "    nodeSelector: |-",
+        "      node-role.kubernetes.io/system: \"true\"",
+        "    tolerations: |-",
+        "      - key: node-role.kubernetes.io/system",
+        "        operator: Exists",
+      ]);
+
+    case "apps-custom-prometheus-rules":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # Alerting rules bundle",
+        "    groups:",
+        "      app.rules:",
+        "        alerts:",
+        "          highErrorRate:",
+        "            isTemplate: false",
+        "            content: |-",
+        "              expr: sum(rate(http_requests_total{status=~\"5..\"}[5m])) > 5",
+        "              for: 5m",
+        "              labels:",
+        "                severity: warning",
+        "              annotations:",
+        "                summary: High 5xx error rate",
+      ]);
+
+    case "apps-grafana-dashboards":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # Dashboard JSON should be stored in dashboards/<name>.json",
+        "    folder: Platform",
+      ]);
+
+    case "apps-kafka-strimzi":
+      return withAppRoot(appName, [
+        "    enabled: true",
+        "    # Strimzi stack template (advanced infra workload)",
+        "    kafka:",
+        "      version: 3.7.0",
+        "      replicas: 3",
+        "      resources:",
+        "        requests:",
+        "          mcpu: 500",
+        "          memoryMb: 1024",
+        "        limits:",
+        "          mcpu: 2000",
+        "          memoryMb: 4096",
+        "      storage:",
+        "        size: 20Gi",
+        "        class: gp3",
+        "    zookeeper:",
+        "      replicas: 3",
+        "      resources:",
+        "        requests:",
+        "          mcpu: 200",
+        "          memoryMb: 512",
+        "        limits:",
+        "          mcpu: 1000",
+        "          memoryMb: 2048",
+        "      storage:",
+        "        size: 20Gi",
+        "        class: gp3",
+        "    entityOperator:",
+        "      topicOperator:",
+        "        resources:",
+        "          requests:",
+        "            mcpu: 100",
+        "            memoryMb: 256",
+        "      userOperator:",
+        "        resources:",
+        "          requests:",
+        "            mcpu: 100",
+        "            memoryMb: 256",
+        "    exporter:",
+        "      resources:",
+        "        requests:",
+        "          mcpu: 100",
+        "          memoryMb: 256",
+        "    topics:",
+        "      app-events:",
+        "        partitions: 3",
+        "        replicas: 3",
+        "        retention: 604800000",
+        "        segment_bytes: 1073741824",
+        "        min_insync_replicas: 2",
+      ]);
+
     case "apps-service-accounts":
       return withAppRoot(appName, [
         "    enabled: true",
@@ -357,4 +479,38 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
   return withAppRoot(appName, [
     "    enabled: true",
   ]);
+}
+
+export function renderAppsInfraTemplateLines(
+  options: { includeNodeUsers?: boolean; includeNodeGroups?: boolean } = {},
+): string[] {
+  const includeNodeUsers = options.includeNodeUsers ?? true;
+  const includeNodeGroups = options.includeNodeGroups ?? true;
+  const lines: string[] = [];
+
+  if (includeNodeUsers) {
+    lines.push(
+      "  node-users:",
+      "    deploy:",
+      "      enabled: true",
+      "      uid: 10001",
+      "      isSudoer: false",
+      "      nodeGroups: |-",
+      "        - workers",
+      "      sshPublicKeys: |-",
+      "        - ssh-ed25519 AAAA... replace-with-real-key",
+    );
+  }
+
+  if (includeNodeGroups) {
+    lines.push(
+      "  node-groups:",
+      "    workers:",
+      "      enabled: true",
+      "      labels: |-",
+      "        role: worker",
+    );
+  }
+
+  return lines;
 }

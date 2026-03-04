@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderEntityTemplateLines, type EntityTemplateGroupType } from "../../src/templates/entityTemplates";
+import {
+  renderAppsInfraTemplateLines,
+  renderEntityTemplateLines,
+  type EntityTemplateGroupType,
+} from "../../src/templates/entityTemplates";
 
 type GroupExpectation = {
   group: EntityTemplateGroupType;
@@ -50,6 +54,34 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
     mustContain: ["    storageClassName: gp3", "    accessModes: |-", "    resources: |-"],
   },
   {
+    group: "apps-limit-range",
+    mustContain: ["    limits: |-"],
+  },
+  {
+    group: "apps-certificates",
+    mustContain: ["    clusterIssuer: letsencrypt-prod", "    host: app.example.local", "    hosts: |-"],
+  },
+  {
+    group: "apps-dex-clients",
+    mustContain: ["    redirectURIs: |-"],
+  },
+  {
+    group: "apps-dex-authenticators",
+    mustContain: ["    applicationDomain: auth.example.local", "    allowedGroups: |-", "    whitelistSourceRanges: |-"],
+  },
+  {
+    group: "apps-custom-prometheus-rules",
+    mustContain: ["    groups:", "          highErrorRate:"],
+  },
+  {
+    group: "apps-grafana-dashboards",
+    mustContain: ["    folder: Platform"],
+  },
+  {
+    group: "apps-kafka-strimzi",
+    mustContain: ["    kafka:", "    zookeeper:", "    topics:"],
+  },
+  {
     group: "apps-service-accounts",
     mustContain: ["    roles:", "    clusterRoles:", "    name: app-runtime"],
   },
@@ -74,4 +106,17 @@ test("job template no longer uses legacy trivial example command", () => {
   const lines = renderEntityTemplateLines("apps-jobs", "job-1");
   const body = lines.join("\n");
   assert.equal(body.includes("job example"), false);
+});
+
+test("apps-infra scaffold renders node-users and node-groups blocks", () => {
+  const lines = renderAppsInfraTemplateLines();
+  assert.ok(lines.includes("  node-users:"));
+  assert.ok(lines.includes("  node-groups:"));
+  assert.ok(lines.includes("      uid: 10001"));
+});
+
+test("apps-infra scaffold can render only missing section", () => {
+  const lines = renderAppsInfraTemplateLines({ includeNodeUsers: false, includeNodeGroups: true });
+  assert.equal(lines.includes("  node-users:"), false);
+  assert.equal(lines.includes("  node-groups:"), true);
 });

@@ -23,7 +23,15 @@ import { HelmAppsWorkbenchActionsProvider } from "./structure/workbenchActionsPr
 import { buildStarterChartFiles, isValidChartVersion, sanitizeChartName } from "./scaffold/chartScaffold";
 import { DEFAULT_HAPP_LSP_ARGS, HappLspClient, type HappPreviewTheme, type LanguageMode } from "./lsp/client";
 import { validateUnexpectedNativeLists } from "./validator/listPolicy";
-import { renderEntityTemplateLines } from "./templates/entityTemplates";
+import {
+  BUILTIN_GROUP_TYPES,
+  ENTITY_TEMPLATE_COMMAND_SPECS,
+  INSERT_ENTITY_TEMPLATE_MENU_CONTEXT,
+  LEGACY_INSERT_ENTITY_EXAMPLE_MENU_CONTEXT,
+  getAllowedAppRootKeysByGroup,
+  type EntityTemplateCommandSpec,
+} from "./catalog/entityGroups";
+import { renderAppsInfraTemplateLines, renderEntityTemplateLines } from "./templates/entityTemplates";
 
 const execFileAsync = promisify(execFile);
 let previewPanel: vscode.WebviewPanel | undefined;
@@ -32,6 +40,7 @@ let entityPreviewState: EntityPreviewState | undefined;
 let previewRenderTimer: NodeJS.Timeout | undefined;
 let previewRenderVersion = 0;
 const manifestPreviewCache = new Map<string, string>();
+const manifestPreviewInFlight = new Set<string>();
 const MANIFEST_PREVIEW_CACHE_LIMIT = 24;
 let completionSchemaCache: JsonSchema | null = null;
 const chartDetectionCache = new Map<string, boolean>();
@@ -85,13 +94,6 @@ interface EntityPreviewState {
   options: PreviewOptions;
 }
 
-interface EntityExampleCommandDef {
-  command: string;
-  groupType: string;
-  appBase: string;
-  contextKey: string;
-}
-
 interface TopLevelGroupBlock {
   name: string;
   startLine: number;
@@ -133,84 +135,10 @@ const DEFAULT_PREVIEW_THEME: HappPreviewTheme = {
   },
 };
 
-const INSERT_ENTITY_EXAMPLE_MENU_CONTEXT = "helmApps.insertEntityExample.visible";
-const ENTITY_EXAMPLE_COMMANDS: readonly EntityExampleCommandDef[] = [
-  {
-    command: "helm-apps.insertEntityExample.appsStateless",
-    groupType: "apps-stateless",
-    appBase: "app",
-    contextKey: "helmApps.insertEntityExample.appsStateless",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsStateful",
-    groupType: "apps-stateful",
-    appBase: "app",
-    contextKey: "helmApps.insertEntityExample.appsStateful",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsJobs",
-    groupType: "apps-jobs",
-    appBase: "job",
-    contextKey: "helmApps.insertEntityExample.appsJobs",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsCronjobs",
-    groupType: "apps-cronjobs",
-    appBase: "cronjob",
-    contextKey: "helmApps.insertEntityExample.appsCronjobs",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsServices",
-    groupType: "apps-services",
-    appBase: "service",
-    contextKey: "helmApps.insertEntityExample.appsServices",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsIngresses",
-    groupType: "apps-ingresses",
-    appBase: "ingress",
-    contextKey: "helmApps.insertEntityExample.appsIngresses",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsNetworkPolicies",
-    groupType: "apps-network-policies",
-    appBase: "policy",
-    contextKey: "helmApps.insertEntityExample.appsNetworkPolicies",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsConfigmaps",
-    groupType: "apps-configmaps",
-    appBase: "config",
-    contextKey: "helmApps.insertEntityExample.appsConfigmaps",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsSecrets",
-    groupType: "apps-secrets",
-    appBase: "secret",
-    contextKey: "helmApps.insertEntityExample.appsSecrets",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsPvcs",
-    groupType: "apps-pvcs",
-    appBase: "pvc",
-    contextKey: "helmApps.insertEntityExample.appsPvcs",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsServiceAccounts",
-    groupType: "apps-service-accounts",
-    appBase: "sa",
-    contextKey: "helmApps.insertEntityExample.appsServiceAccounts",
-  },
-  {
-    command: "helm-apps.insertEntityExample.appsK8sManifests",
-    groupType: "apps-k8s-manifests",
-    appBase: "manifest",
-    contextKey: "helmApps.insertEntityExample.appsK8sManifests",
-  },
-];
-let insertExampleContextTimer: NodeJS.Timeout | undefined;
-let insertExampleContextVersion = 0;
-let insertExampleContextStateKey = "";
+const ENTITY_TEMPLATE_COMMANDS: readonly EntityTemplateCommandSpec[] = ENTITY_TEMPLATE_COMMAND_SPECS;
+let insertTemplateContextTimer: NodeJS.Timeout | undefined;
+let insertTemplateContextVersion = 0;
+let insertTemplateContextStateKey = "";
 
 interface LibrarySettingDef {
   key: string;
@@ -302,7 +230,7 @@ const LIBRARY_SETTINGS: LibrarySettingDef[] = [
 
 export function activate(context: vscode.ExtensionContext): void {
   void happLspClient.setAvailableContext(false);
-  void applyInsertExampleContextState(false, new Set<string>());
+  void applyInsertTemplateContextState(false, new Set<string>());
   context.subscriptions.push(happLspBootstrapOutput);
   context.subscriptions.push(listPolicyDiagnostics);
   const valuesStructure = new ValuesStructureProvider();
@@ -319,12 +247,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       valuesStructure.setDocument(editor?.document);
       void refreshListPolicyDiagnosticsForDocument(editor?.document);
-      scheduleInsertExampleContextRefresh(editor, 10);
+      scheduleInsertTemplateContextRefresh(editor, 10);
     }),
   );
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection((event) => {
-      scheduleInsertExampleContextRefresh(event.textEditor, 40);
+      scheduleInsertTemplateContextRefresh(event.textEditor, 40);
     }),
   );
 
@@ -339,7 +267,7 @@ export function activate(context: vscode.ExtensionContext): void {
       valuesStructure.setDocument(active);
       scheduleEntityPreviewRefreshFor(event.document, 90);
       void refreshListPolicyDiagnosticsForDocument(event.document);
-      scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 80);
+      scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 80);
     }),
   );
   context.subscriptions.push(
@@ -350,7 +278,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       scheduleEntityPreviewRefreshFor(document, 0);
       void refreshListPolicyDiagnosticsForDocument(document);
-      scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 80);
+      scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 80);
     }),
   );
   context.subscriptions.push(
@@ -446,12 +374,19 @@ export function activate(context: vscode.ExtensionContext): void {
       await pasteClipboardAsHelmApps(editor);
     }),
   );
-  for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+  for (const spec of ENTITY_TEMPLATE_COMMANDS) {
     context.subscriptions.push(
-      vscode.commands.registerCommand(spec.command, async () => {
-        await insertEntityExample(spec);
+      vscode.commands.registerCommand(spec.commandId, async () => {
+        await insertEntityTemplate(spec);
       }),
     );
+    if (spec.legacyCommandId) {
+      context.subscriptions.push(
+        vscode.commands.registerCommand(spec.legacyCommandId, async () => {
+          await insertEntityTemplate(spec);
+        }),
+      );
+    }
   }
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.openDependencyGraph", async () => {
@@ -651,7 +586,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void configureSchema(context, true);
   valuesStructure.setDocument(vscode.window.activeTextEditor?.document);
-  scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 0);
+  scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 0);
   for (const document of vscode.workspace.textDocuments) {
     void refreshListPolicyDiagnosticsForDocument(document);
   }
@@ -1090,31 +1025,31 @@ function parseValuesObject(text: string): Record<string, unknown> {
   }
 }
 
-function scheduleInsertExampleContextRefresh(editor: vscode.TextEditor | undefined, delayMs: number): void {
+function scheduleInsertTemplateContextRefresh(editor: vscode.TextEditor | undefined, delayMs: number): void {
   const targetEditor = editor;
-  if (insertExampleContextTimer) {
-    clearTimeout(insertExampleContextTimer);
+  if (insertTemplateContextTimer) {
+    clearTimeout(insertTemplateContextTimer);
   }
-  const requestVersion = ++insertExampleContextVersion;
-  insertExampleContextTimer = setTimeout(() => {
-    insertExampleContextTimer = undefined;
-    void refreshInsertExampleContext(targetEditor, requestVersion);
+  const requestVersion = ++insertTemplateContextVersion;
+  insertTemplateContextTimer = setTimeout(() => {
+    insertTemplateContextTimer = undefined;
+    void refreshInsertTemplateContext(targetEditor, requestVersion);
   }, Math.max(0, delayMs));
 }
 
-async function refreshInsertExampleContext(editor: vscode.TextEditor | undefined, requestVersion: number): Promise<void> {
+async function refreshInsertTemplateContext(editor: vscode.TextEditor | undefined, requestVersion: number): Promise<void> {
   const activeEditor = editor ?? vscode.window.activeTextEditor;
   if (!activeEditor || activeEditor.document.languageId !== "yaml") {
-    if (requestVersion === insertExampleContextVersion) {
-      await applyInsertExampleContextState(false, new Set<string>());
+    if (requestVersion === insertTemplateContextVersion) {
+      await applyInsertTemplateContextState(false, new Set<string>());
     }
     return;
   }
 
   const text = activeEditor.document.getText();
   if (!looksLikeHelmAppsValuesText(text)) {
-    if (requestVersion === insertExampleContextVersion) {
-      await applyInsertExampleContextState(false, new Set<string>());
+    if (requestVersion === insertTemplateContextVersion) {
+      await applyInsertTemplateContextState(false, new Set<string>());
     }
     return;
   }
@@ -1123,32 +1058,36 @@ async function refreshInsertExampleContext(editor: vscode.TextEditor | undefined
   const activeBlock = findTopLevelGroupBlockAtPosition(text, blocks, activeEditor.selection.active);
   const allowed = new Set<string>();
   if (!activeBlock) {
-    for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+    for (const spec of ENTITY_TEMPLATE_COMMANDS) {
       allowed.add(spec.groupType);
     }
-  } else if (ENTITY_EXAMPLE_COMMANDS.some((spec) => spec.groupType === activeBlock.effectiveType)) {
+  } else if (ENTITY_TEMPLATE_COMMANDS.some((spec) => spec.groupType === activeBlock.effectiveType)) {
     allowed.add(activeBlock.effectiveType);
   }
 
-  if (requestVersion !== insertExampleContextVersion) {
+  if (requestVersion !== insertTemplateContextVersion) {
     return;
   }
-  await applyInsertExampleContextState(allowed.size > 0, allowed);
+  await applyInsertTemplateContextState(allowed.size > 0, allowed);
 }
 
-async function applyInsertExampleContextState(visible: boolean, allowedTypes: Set<string>): Promise<void> {
+async function applyInsertTemplateContextState(visible: boolean, allowedTypes: Set<string>): Promise<void> {
   const key = `${visible ? "1" : "0"}|${[...allowedTypes].sort().join(",")}`;
-  if (key === insertExampleContextStateKey) {
+  if (key === insertTemplateContextStateKey) {
     return;
   }
-  insertExampleContextStateKey = key;
-  await vscode.commands.executeCommand("setContext", INSERT_ENTITY_EXAMPLE_MENU_CONTEXT, visible);
-  for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+  insertTemplateContextStateKey = key;
+  await vscode.commands.executeCommand("setContext", INSERT_ENTITY_TEMPLATE_MENU_CONTEXT, visible);
+  await vscode.commands.executeCommand("setContext", LEGACY_INSERT_ENTITY_EXAMPLE_MENU_CONTEXT, visible);
+  for (const spec of ENTITY_TEMPLATE_COMMANDS) {
     await vscode.commands.executeCommand("setContext", spec.contextKey, allowedTypes.has(spec.groupType));
+    if (spec.legacyContextKey) {
+      await vscode.commands.executeCommand("setContext", spec.legacyContextKey, allowedTypes.has(spec.groupType));
+    }
   }
 }
 
-async function insertEntityExample(spec: EntityExampleCommandDef): Promise<void> {
+async function insertEntityTemplate(spec: EntityTemplateCommandSpec): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     return;
@@ -1180,32 +1119,72 @@ async function insertEntityExample(spec: EntityExampleCommandDef): Promise<void>
     ?? findPreferredGroupNameByType(blocks, spec.groupType)
     ?? spec.groupType;
 
-  const insertion = buildEntityExampleInsertion(editor.document, text, targetGroupName, spec);
+  const insertion = buildEntityTemplateInsertion(editor.document, text, targetGroupName, spec);
+  if (!insertion) {
+    void vscode.window.showInformationMessage(
+      t(
+        `Template scaffold is already present in '${targetGroupName}'.`,
+        `Шаблон уже присутствует в '${targetGroupName}'.`,
+      ),
+    );
+    return;
+  }
   const applied = await editor.edit((builder) => {
     builder.insert(insertion.position, insertion.text);
   });
   if (!applied) {
     return;
   }
-  scheduleInsertExampleContextRefresh(editor, 30);
+  scheduleInsertTemplateContextRefresh(editor, 30);
   void vscode.window.showInformationMessage(
     t(
-      `Inserted template '${targetGroupName}.${insertion.appName}' (${spec.groupType})`,
-      `Вставлен шаблон '${targetGroupName}.${insertion.appName}' (${spec.groupType})`,
+      `Inserted template '${insertion.insertedLabel}' (${spec.groupType})`,
+      `Вставлен шаблон '${insertion.insertedLabel}' (${spec.groupType})`,
     ),
   );
 }
 
-function buildEntityExampleInsertion(
+function buildEntityTemplateInsertion(
   document: vscode.TextDocument,
   text: string,
   targetGroupName: string,
-  spec: EntityExampleCommandDef,
-): { position: vscode.Position; text: string; appName: string } {
+  spec: EntityTemplateCommandSpec,
+): { position: vscode.Position; text: string; insertedLabel: string } | null {
   const lines = text.split(/\r?\n/);
   const eol = document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
   const blocks = collectTopLevelGroupBlocks(text);
   const targetBlock = blocks.find((b) => b.name === targetGroupName);
+
+  if (spec.insertionMode === "groupScaffold" && spec.groupType === "apps-infra") {
+    const values = parseValuesObject(text);
+    const targetGroup = toMap(values[targetGroupName]);
+    const hasNodeUsers = hasOwnKey(targetGroup, "node-users");
+    const hasNodeGroups = hasOwnKey(targetGroup, "node-groups");
+    if (targetBlock && hasNodeUsers && hasNodeGroups) {
+      return null;
+    }
+
+    const scaffoldLines = renderAppsInfraTemplateLines({
+      includeNodeUsers: !targetBlock || !hasNodeUsers,
+      includeNodeGroups: !targetBlock || !hasNodeGroups,
+    });
+    const scaffoldText = `${scaffoldLines.join(eol)}${eol}`;
+    if (targetBlock) {
+      return {
+        position: new vscode.Position(targetBlock.endLine, 0),
+        text: scaffoldText,
+        insertedLabel: `${targetGroupName}.{node-users,node-groups}`,
+      };
+    }
+
+    const prefix = buildEntityGroupInsertionPrefix(text, eol);
+    return {
+      position: new vscode.Position(lines.length, 0),
+      text: `${prefix}${targetGroupName}:${eol}${scaffoldText}`,
+      insertedLabel: `${targetGroupName}.{node-users,node-groups}`,
+    };
+  }
+
   const existingAppNames = collectExistingEntityNames(text, targetGroupName);
   const appName = nextEntityName(existingAppNames, spec.appBase);
   const entityLines = renderEntityTemplateLines(spec.groupType, appName);
@@ -1215,10 +1194,24 @@ function buildEntityExampleInsertion(
     return {
       position: new vscode.Position(targetBlock.endLine, 0),
       text: entityText,
-      appName,
+      insertedLabel: `${targetGroupName}.${appName}`,
     };
   }
 
+  const prefix = buildEntityGroupInsertionPrefix(text, eol);
+  const groupText = `${targetGroupName}:${eol}${entityText}`;
+  return {
+    position: new vscode.Position(lines.length, 0),
+    text: `${prefix}${groupText}`,
+    insertedLabel: `${targetGroupName}.${appName}`,
+  };
+}
+
+function hasOwnKey(root: Record<string, unknown> | null | undefined, key: string): boolean {
+  return !!root && Object.prototype.hasOwnProperty.call(root, key);
+}
+
+function buildEntityGroupInsertionPrefix(text: string, eol: string): string {
   let prefix = "";
   if (text.trim().length > 0) {
     if (!text.endsWith("\n") && !text.endsWith("\r\n")) {
@@ -1228,12 +1221,7 @@ function buildEntityExampleInsertion(
       prefix += eol;
     }
   }
-  const groupText = `${targetGroupName}:${eol}${entityText}`;
-  return {
-    position: new vscode.Position(lines.length, 0),
-    text: `${prefix}${groupText}`,
-    appName,
-  };
+  return prefix;
 }
 
 function collectExistingEntityNames(text: string, groupName: string): Set<string> {
@@ -2496,6 +2484,10 @@ async function renderEntityPreview(): Promise<void> {
       menuModel,
       previewTheme,
     );
+
+    if (state.options.renderMode === "values") {
+      void prewarmManifestPreview(document, documentText, state);
+    }
   } catch (err) {
     if (!previewPanel || previewPanel !== panel || !entityPreviewState || entityPreviewState !== state || renderId !== previewRenderVersion) {
       return;
@@ -2517,6 +2509,39 @@ async function renderEntityPreview(): Promise<void> {
       },
       DEFAULT_PREVIEW_THEME,
     );
+  }
+}
+
+async function prewarmManifestPreview(
+  document: vscode.TextDocument,
+  documentText: string,
+  state: EntityPreviewState,
+): Promise<void> {
+  if (!happLspClient.isRunning()) {
+    return;
+  }
+  const cacheKey = buildManifestPreviewCacheKey(document, state);
+  if (manifestPreviewCache.has(cacheKey) || manifestPreviewInFlight.has(cacheKey)) {
+    return;
+  }
+
+  manifestPreviewInFlight.add(cacheKey);
+  const snapshot: EntityPreviewState = {
+    documentUri: state.documentUri,
+    group: state.group,
+    app: state.app,
+    options: {
+      ...state.options,
+      renderMode: "manifest",
+    },
+  };
+  try {
+    const manifest = await renderManifestFromHappLsp(document, documentText, snapshot);
+    cacheManifestPreview(cacheKey, manifest);
+  } catch {
+    // ignore prewarm errors; primary render path will show explicit errors on demand
+  } finally {
+    manifestPreviewInFlight.delete(cacheKey);
   }
 }
 
@@ -3051,21 +3076,7 @@ async function provideCompletionItems(
   const items: vscode.CompletionItem[] = [];
 
   if (contextPath.length === 0 && indent <= 2) {
-    const topGroups = [
-      "apps-stateless",
-      "apps-stateful",
-      "apps-jobs",
-      "apps-cronjobs",
-      "apps-services",
-      "apps-ingresses",
-      "apps-network-policies",
-      "apps-configmaps",
-      "apps-secrets",
-      "apps-pvcs",
-      "apps-service-accounts",
-      "apps-k8s-manifests",
-    ];
-    for (const group of topGroups) {
+    for (const group of BUILTIN_GROUP_TYPES) {
       const item = new vscode.CompletionItem(group, vscode.CompletionItemKind.Module);
       item.insertText = `${group}:`;
       item.detail = "helm-apps group";
@@ -3190,7 +3201,7 @@ function buildIncludeCompletionItems(text: string, line: number): vscode.Complet
 }
 
 function applyGroupAwareRootFiltering(items: vscode.CompletionItem[], effectiveGroup: string): vscode.CompletionItem[] {
-  const allowed = allowedRootKeysByGroup(effectiveGroup);
+  const allowed = getAllowedAppRootKeysByGroup(effectiveGroup);
   if (allowed.size > 0) {
     const filtered: vscode.CompletionItem[] = [];
     for (const item of items) {
@@ -3211,77 +3222,6 @@ function applyGroupAwareRootFiltering(items: vscode.CompletionItem[], effectiveG
     }
   }
   return items;
-}
-
-function allowedRootKeysByGroup(group: string): Set<string> {
-  const common = [
-    "enabled",
-    "_include",
-    "name",
-    "annotations",
-    "labels",
-    "selector",
-    "type",
-  ];
-  const workload = [
-    "containers",
-    "initContainers",
-    "resources",
-    "envVars",
-    "service",
-    "serviceAccount",
-    "affinity",
-    "tolerations",
-    "nodeSelector",
-    "volumes",
-    "imagePullSecrets",
-    "podDisruptionBudget",
-    "horizontalPodAutoscaler",
-    "verticalPodAutoscaler",
-  ];
-  const ingress = [
-    "class",
-    "host",
-    "hosts",
-    "paths",
-    "tls",
-    "ingressClassName",
-    "service",
-    "servicePort",
-    "dexAuth",
-    "sendAuthorizationHeader",
-  ];
-  const service = [
-    "ports",
-    "selector",
-    "type",
-  ];
-  const configmap = ["data", "binaryData", "immutable"];
-  const secret = ["data", "binaryData", "immutable", "stringData", "kind"];
-
-  if (isWorkloadGroup(group)) {
-    return new Set([...common, ...workload]);
-  }
-  if (group === "apps-ingresses") {
-    return new Set([...common, ...ingress]);
-  }
-  if (group === "apps-services") {
-    return new Set([...common, ...service]);
-  }
-  if (group === "apps-configmaps") {
-    return new Set([...common, ...configmap]);
-  }
-  if (group === "apps-secrets") {
-    return new Set([...common, ...secret]);
-  }
-  return new Set();
-}
-
-function isWorkloadGroup(group: string): boolean {
-  return group === "apps-stateless"
-    || group === "apps-stateful"
-    || group === "apps-jobs"
-    || group === "apps-cronjobs";
 }
 
 function resolveEffectiveGroupType(text: string, groupName: string): string {

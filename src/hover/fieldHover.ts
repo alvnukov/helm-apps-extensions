@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { APP_ENTRY_GROUP_SET, BUILTIN_GROUP_SET } from "../catalog/entityGroups";
 
 export interface FieldDoc {
   title: string;
@@ -55,51 +56,7 @@ type JsonSchema = {
 let schemaRootCache: JsonSchema | null = null;
 const DOCS_ONLINE_BASE = "https://github.com/alvnukov/helm-apps/blob/main/";
 
-const BUILTIN_GROUPS = new Set([
-  "apps-stateless",
-  "apps-stateful",
-  "apps-jobs",
-  "apps-cronjobs",
-  "apps-services",
-  "apps-ingresses",
-  "apps-network-policies",
-  "apps-configmaps",
-  "apps-secrets",
-  "apps-pvcs",
-  "apps-limit-range",
-  "apps-certificates",
-  "apps-dex-clients",
-  "apps-dex-authenticators",
-  "apps-custom-prometheus-rules",
-  "apps-grafana-dashboards",
-  "apps-kafka-strimzi",
-  "apps-infra",
-  "apps-service-accounts",
-  "apps-k8s-manifests",
-]);
-
 const BASE_APP_KEYS = ["_include", "enabled", "name", "labels", "annotations"];
-const APP_ENTRY_GROUPS = new Set([
-  "apps-stateless",
-  "apps-stateful",
-  "apps-jobs",
-  "apps-cronjobs",
-  "apps-services",
-  "apps-ingresses",
-  "apps-network-policies",
-  "apps-configmaps",
-  "apps-secrets",
-  "apps-pvcs",
-  "apps-limit-range",
-  "apps-certificates",
-  "apps-dex-clients",
-  "apps-dex-authenticators",
-  "apps-custom-prometheus-rules",
-  "apps-grafana-dashboards",
-  "apps-kafka-strimzi",
-  "apps-service-accounts",
-  "apps-k8s-manifests",
-]);
 
 const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-stateless": {
@@ -2774,7 +2731,7 @@ export function findFieldDoc(path: string[], context?: FieldDocLookupContext): F
 
   const byLastKey = LAST_KEY_RULES[path[path.length - 1] ?? ""];
   if (byLastKey) {
-    const contextPath = candidatePaths.find((candidate) => candidate.length === path.length && BUILTIN_GROUPS.has(candidate[0])) ?? path;
+    const contextPath = candidatePaths.find((candidate) => candidate.length === path.length && BUILTIN_GROUP_SET.has(candidate[0])) ?? path;
     return specializeDocForPath(contextPath, byLastKey);
   }
 
@@ -2896,7 +2853,7 @@ function dynamicFieldDoc(path: string[]): FieldDoc | null {
         example: "global:\n  env: prod\n",
       };
     }
-    if (BUILTIN_GROUPS.has(group)) {
+    if (BUILTIN_GROUP_SET.has(group)) {
   const guide = GROUP_APP_GUIDES[group];
   const groupKeys = guide ? formatKeyList(guide.keys) : "";
   return {
@@ -3111,7 +3068,7 @@ function specializeDocForPath(path: string[], doc: FieldDoc): FieldDoc {
 
 function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppGuide): FieldDoc | null {
   const group = path[0];
-  if (!APP_ENTRY_GROUPS.has(group) || path.length < 3) {
+  if (!APP_ENTRY_GROUP_SET.has(group) || path.length < 3) {
     return null;
   }
   if (doc.title === "Custom or Unknown Field") {
