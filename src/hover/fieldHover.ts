@@ -3202,7 +3202,7 @@ function buildCandidateDocPaths(path: string[], context?: FieldDocLookupContext)
   }
 
   const group = path[0];
-  if (!group || group === "global" || group.startsWith("apps-")) {
+  if (!group || group === "global" || BUILTIN_GROUP_SET.has(group)) {
     return out;
   }
 

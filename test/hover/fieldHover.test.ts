@@ -155,6 +155,21 @@ my-apps:
   assert.equal(doc?.title, "Containers Spec");
 });
 
+test("custom group resolves docs by env-map __GroupVars__.type", () => {
+  const yaml = `global:
+  env: prod
+apps-routes:
+  __GroupVars__:
+    type:
+      _default: apps-ingresses
+  ui:
+    servicePort: 8080
+`;
+  const doc = findFieldDoc(["apps-routes", "ui", "servicePort"], { documentText: yaml });
+  assert.ok(doc);
+  assert.equal(doc?.title, "Ingress Backend Service Port");
+});
+
 test("path-specific service type doc overrides generic type", () => {
   const doc = findFieldDoc(["apps-services", "api", "type"]);
   assert.ok(doc);
