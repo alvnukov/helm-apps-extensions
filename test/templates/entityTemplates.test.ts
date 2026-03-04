@@ -62,7 +62,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-limit-range",
-    mustContain: ["    limits: |-"],
+    mustContain: ["    limits: |-", "      - type: Container", "        max:", "      - type: Pod"],
   },
   {
     group: "apps-certificates",

@@ -208,6 +208,12 @@ test("pvc extraSpec field has pvc-specific doc", () => {
   assert.equal(extraSpec?.title, "PVC Extra Spec Patch");
 });
 
+test("limit-range limits field has limit-range-specific doc", () => {
+  const limits = findFieldDoc(["apps-limit-range", "namespace-defaults", "limits"]);
+  assert.ok(limits);
+  assert.equal(limits?.title, "LimitRange Limits Rules");
+});
+
 test("configmaps and secrets expose group-specific helper docs", () => {
   const configEnvVars = findFieldDoc(["apps-configmaps", "cfg", "envVars"]);
   assert.ok(configEnvVars);

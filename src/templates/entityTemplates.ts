@@ -335,15 +335,22 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
     case "apps-limit-range":
       return withAppRoot(appName, [
         "    enabled: true",
-        "    # Namespace resource policy limits",
+        "    # Namespace resource policy limits (requests/limits guardrails)",
         "    limits: |-",
         "      - type: Container",
-        "        default:",
-        "          cpu: 500m",
-        "          memory: 512Mi",
         "        defaultRequest:",
         "          cpu: 100m",
         "          memory: 128Mi",
+        "        default:",
+        "          cpu: 500m",
+        "          memory: 512Mi",
+        "        max:",
+        "          cpu: \"2\"",
+        "          memory: 2Gi",
+        "      - type: Pod",
+        "        max:",
+        "          cpu: \"4\"",
+        "          memory: 4Gi",
       ]);
 
     case "apps-certificates":

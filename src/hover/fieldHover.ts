@@ -1035,6 +1035,25 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-limit-range", "*", "limits"],
+    doc: {
+      title: "LimitRange Limits Rules",
+      titleRu: "Правила limits для LimitRange",
+      summary: "Native Kubernetes `spec.limits` list defining default/min/max resources at namespace level.",
+      summaryRu: "Нативный список Kubernetes `spec.limits`, задающий default/min/max ресурсы на уровне namespace.",
+      type: "YAML block string | list | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/policy/limit-range/",
+      notes: [
+        "Each item usually has `type` (`Container`/`Pod`) and resource bounds (`defaultRequest`, `default`, `min`, `max`).",
+      ],
+      notesRu: [
+        "Обычно каждый элемент содержит `type` (`Container`/`Pod`) и ресурсные границы (`defaultRequest`, `default`, `min`, `max`).",
+      ],
+      example: "limits: |-\n  - type: Container\n    defaultRequest:\n      cpu: 100m\n      memory: 128Mi\n    default:\n      cpu: 500m\n      memory: 512Mi\n",
+    },
+  },
+  {
     pattern: ["apps-certificates", "*", "clusterIssuer"],
     doc: {
       title: "Certificate ClusterIssuer",
