@@ -27,7 +27,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-cronjobs",
-    mustContain: ["    schedule: \"*/15 * * * *\"", "    concurrencyPolicy: Forbid", "    containers:"],
+    mustContain: ["    _include: [\"apps-cronjobs-defaultCronJob\"]", "    schedule: \"*/15 * * * *\"", "    concurrencyPolicy: Forbid", "    containers:"],
   },
   {
     group: "apps-services",
@@ -35,19 +35,19 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-ingresses",
-    mustContain: ["    ingressClassName: nginx", "    paths: |-", "    tls:"],
+    mustContain: ["    _include: [\"apps-ingresses-defaultIngress\"]", "    ingressClassName: nginx", "    paths: |-", "    tls:"],
   },
   {
     group: "apps-network-policies",
-    mustContain: ["    type: kubernetes", "    policyTypes: |-", "    ingress: |-", "    egress: |-"],
+    mustContain: ["    _include: [\"apps-network-policies-defaultNetworkPolicy\"]", "    type: kubernetes", "    policyTypes: |-", "    ingress: |-", "    egress: |-"],
   },
   {
     group: "apps-configmaps",
-    mustContain: ["    data:", "    binaryData:", "    envVars:"],
+    mustContain: ["    _include: [\"apps-configmaps-defaultConfigmap\"]", "    data:", "    binaryData:", "    envVars:"],
   },
   {
     group: "apps-secrets",
-    mustContain: ["    type: Opaque", "    data:", "    binaryData:"],
+    mustContain: ["    _include: [\"apps-secrets-defaultSecret\"]", "    type: Opaque", "    data:", "    binaryData:"],
   },
   {
     group: "apps-pvcs",
@@ -67,7 +67,13 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-dex-authenticators",
-    mustContain: ["    applicationDomain: auth.example.local", "    allowedGroups: |-", "    whitelistSourceRanges: |-"],
+    mustContain: [
+      "    applicationDomain: auth.example.local",
+      "    keepUsersLoggedInFor: 168h",
+      "    signOutURL: https://auth.example.local/sign_out",
+      "    allowedGroups: |-",
+      "    whitelistSourceRanges: |-",
+    ],
   },
   {
     group: "apps-custom-prometheus-rules",
@@ -79,11 +85,11 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-kafka-strimzi",
-    mustContain: ["    kafka:", "    zookeeper:", "    topics:"],
+    mustContain: ["    priorityClassName: production-high", "    kafka:", "    zookeeper:", "    deckhouseMetrics:", "    topics:"],
   },
   {
     group: "apps-service-accounts",
-    mustContain: ["    roles:", "    clusterRoles:", "    name: app-runtime"],
+    mustContain: ["    roles:", "    clusterRoles:", "    name: app-runtime", "    namespace: apps", "    automountServiceAccountToken: false"],
   },
   {
     group: "apps-k8s-manifests",

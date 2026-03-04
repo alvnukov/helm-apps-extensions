@@ -177,6 +177,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Periodic maintenance/report template",
+        "    _include: [\"apps-cronjobs-defaultCronJob\"]",
         "    schedule: \"*/15 * * * *\"",
         "    concurrencyPolicy: Forbid",
         "    startingDeadlineSeconds: 180",
@@ -222,6 +223,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Public entrypoint template",
+        "    _include: [\"apps-ingresses-defaultIngress\"]",
         "    ingressClassName: nginx",
         "    host: app.example.local",
         "    hosts: |-",
@@ -240,6 +242,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Network access policy template (start from deny + allow-list)",
+        "    _include: [\"apps-network-policies-defaultNetworkPolicy\"]",
         "    type: kubernetes",
         "    podSelector: |-",
         "      matchLabels:",
@@ -269,6 +272,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Non-sensitive runtime config",
+        "    _include: [\"apps-configmaps-defaultConfigmap\"]",
         "    data:",
         "      APP_MODE: \"service\"",
         "      LOG_LEVEL: \"info\"",
@@ -286,6 +290,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Sensitive data (prefer external secret manager in production)",
+        "    _include: [\"apps-secrets-defaultSecret\"]",
         "    type: Opaque",
         "    data:",
         "      DB_USER: app",
@@ -336,17 +341,22 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # OAuth client entry for Dex",
+        "    # First thing to change: callback URL(s) for your app",
         "    redirectURIs: |-",
         "      - https://app.example.local/callback",
+        "      - https://app.example.local/oauth2/callback",
       ]);
 
     case "apps-dex-authenticators":
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Ingress auth helper based on DexAuthenticator",
+        "    # First thing to change: public domain + TLS secret",
         "    applicationDomain: auth.example.local",
         "    applicationIngressClassName: nginx",
         "    applicationIngressCertificateSecretName: auth-example-local-tls",
+        "    keepUsersLoggedInFor: 168h",
+        "    signOutURL: https://auth.example.local/sign_out",
         "    allowedGroups: |-",
         "      - platform-admins",
         "      - devops",
@@ -365,6 +375,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Alerting rules bundle",
+        "    # First thing to change: alert expression + threshold",
         "    groups:",
         "      app.rules:",
         "        alerts:",
@@ -383,6 +394,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Dashboard JSON should be stored in dashboards/<name>.json",
+        "    # First thing to change: target folder for dashboard placement",
         "    folder: Platform",
       ]);
 
@@ -390,6 +402,9 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # Strimzi stack template (advanced infra workload)",
+        "    # First thing to change: version/replicas/storage according to cluster capacity",
+        "    priorityClassName: production-high",
+        "    prometheusSampleLimit: 10000",
         "    kafka:",
         "      version: 3.7.0",
         "      replicas: 3",
@@ -403,6 +418,8 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "      storage:",
         "        size: 20Gi",
         "        class: gp3",
+        "      jvmOptions: |-",
+        "        -Xms2g -Xmx2g",
         "    zookeeper:",
         "      replicas: 3",
         "      resources:",
@@ -415,6 +432,14 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "      storage:",
         "        size: 20Gi",
         "        class: gp3",
+        "      metricsConfig: |-",
+        "        type: jmxPrometheusExporter",
+        "        valueFrom:",
+        "          configMapKeyRef:",
+        "            name: zookeeper-metrics",
+        "            key: zookeeper-metrics-config.yml",
+        "      jvmOptions: |-",
+        "        -Xms512m -Xmx512m",
         "    entityOperator:",
         "      topicOperator:",
         "        resources:",
@@ -431,6 +456,11 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "        requests:",
         "          mcpu: 100",
         "          memoryMb: 256",
+        "    deckhouseMetrics:",
+        "      kafka-lag:",
+        "        enabled: true",
+        "        expr: sum(kafka_consumergroup_lag)",
+        "        threshold: 10000",
         "    topics:",
         "      app-events:",
         "        partitions: 3",
@@ -444,7 +474,10 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # RBAC template with namespaced and cluster-scoped permissions",
+        "    # First thing to change: rules/verbs to least-privilege set",
         "    name: app-runtime",
+        "    namespace: apps",
+        "    automountServiceAccountToken: false",
         "    roles:",
         "      pod-reader:",
         "        rules: |-",
@@ -457,6 +490,11 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "          - apiGroups: [\"metrics.k8s.io\"]",
         "            resources: [\"pods\"]",
         "            verbs: [\"get\", \"list\"]",
+        "        binding:",
+        "          subjects: |-",
+        "            - kind: Group",
+        "              name: observability-readers",
+        "              apiGroup: rbac.authorization.k8s.io",
       ]);
 
     case "apps-k8s-manifests":
