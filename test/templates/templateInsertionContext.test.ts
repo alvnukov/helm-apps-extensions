@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   allowedTemplateGroupTypesForCursor,
+  buildAllowedTemplateGroupTypes,
   buildEntityGroupInsertionPrefix,
   canInsertGroupScaffold,
   collectExistingEntityNames,
@@ -88,4 +89,22 @@ test("canInsertGroupScaffold detects when apps-infra already has both sections",
   const partial = `apps-infra:\n  node-users:\n    deploy:\n      uid: 1001\n`;
   assert.equal(canInsertGroupScaffold(partial, "apps-infra", "apps-infra"), true);
   assert.equal(canInsertGroupScaffold(partial, "apps-stateless", "apps-stateless"), true);
+});
+
+test("buildAllowedTemplateGroupTypes hides complete infra scaffold and keeps partial", () => {
+  const specs = [
+    { groupType: "apps-services", insertionMode: "appEntity" as const },
+    { groupType: "apps-infra", insertionMode: "groupScaffold" as const },
+  ];
+
+  const completeInfra = `apps-infra:\n  node-users:\n    deploy:\n      uid: 1001\n  node-groups:\n    workers: {}\n`;
+  const completeBlocks = collectTopLevelGroupBlocks(completeInfra);
+  const allowedComplete = buildAllowedTemplateGroupTypes(completeInfra, completeBlocks, undefined, specs);
+  assert.equal(allowedComplete.has("apps-services"), true);
+  assert.equal(allowedComplete.has("apps-infra"), false);
+
+  const partialInfra = `apps-infra:\n  node-users:\n    deploy:\n      uid: 1001\n`;
+  const partialBlocks = collectTopLevelGroupBlocks(partialInfra);
+  const allowedPartial = buildAllowedTemplateGroupTypes(partialInfra, partialBlocks, undefined, specs);
+  assert.equal(allowedPartial.has("apps-infra"), true);
 });

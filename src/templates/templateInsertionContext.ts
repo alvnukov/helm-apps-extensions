@@ -103,6 +103,39 @@ export function allowedTemplateGroupTypesForCursor(
   return allowed;
 }
 
+export interface TemplateVisibilitySpec {
+  groupType: string;
+  insertionMode: "appEntity" | "groupScaffold";
+}
+
+export function buildAllowedTemplateGroupTypes(
+  text: string,
+  blocks: TopLevelGroupBlock[],
+  activeBlock: TopLevelGroupBlock | undefined,
+  specs: readonly TemplateVisibilitySpec[],
+): Set<string> {
+  const scopedAllowed = allowedTemplateGroupTypesForCursor(activeBlock, specs.map((spec) => spec.groupType));
+  const allowed = new Set<string>();
+
+  for (const spec of specs) {
+    if (!scopedAllowed.has(spec.groupType)) {
+      continue;
+    }
+    if (spec.insertionMode !== "groupScaffold") {
+      allowed.add(spec.groupType);
+      continue;
+    }
+    const targetGroupName = activeBlock?.name
+      ?? findPreferredGroupNameByType(blocks, spec.groupType)
+      ?? spec.groupType;
+    if (canInsertGroupScaffold(text, targetGroupName, spec.groupType)) {
+      allowed.add(spec.groupType);
+    }
+  }
+
+  return allowed;
+}
+
 export function findPreferredGroupNameByType(blocks: TopLevelGroupBlock[], groupType: string): string | null {
   const exact = blocks.find((b) => b.name === groupType);
   if (exact) {
