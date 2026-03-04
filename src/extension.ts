@@ -32,6 +32,16 @@ import {
   type EntityTemplateCommandSpec,
 } from "./catalog/entityGroups";
 import { renderAppsInfraTemplateLines, renderEntityTemplateLines } from "./templates/entityTemplates";
+import {
+  allowedTemplateGroupTypesForCursor,
+  buildEntityGroupInsertionPrefix,
+  collectExistingEntityNames,
+  collectTopLevelGroupBlocks,
+  findPreferredGroupNameByType,
+  findTopLevelGroupBlockAtLine,
+  nextEntityName,
+  resolveEffectiveGroupType,
+} from "./templates/templateInsertionContext";
 
 const execFileAsync = promisify(execFile);
 let previewPanel: vscode.WebviewPanel | undefined;
@@ -92,13 +102,6 @@ interface EntityPreviewState {
   group: string;
   app: string;
   options: PreviewOptions;
-}
-
-interface TopLevelGroupBlock {
-  name: string;
-  startLine: number;
-  endLine: number;
-  effectiveType: string;
 }
 
 const DEFAULT_PREVIEW_THEME: HappPreviewTheme = {
@@ -1055,15 +1058,11 @@ async function refreshInsertTemplateContext(editor: vscode.TextEditor | undefine
   }
 
   const blocks = collectTopLevelGroupBlocks(text);
-  const activeBlock = findTopLevelGroupBlockAtPosition(text, blocks, activeEditor.selection.active);
-  const allowed = new Set<string>();
-  if (!activeBlock) {
-    for (const spec of ENTITY_TEMPLATE_COMMANDS) {
-      allowed.add(spec.groupType);
-    }
-  } else if (ENTITY_TEMPLATE_COMMANDS.some((spec) => spec.groupType === activeBlock.effectiveType)) {
-    allowed.add(activeBlock.effectiveType);
-  }
+  const activeBlock = findTopLevelGroupBlockAtLine(text, blocks, activeEditor.selection.active.line);
+  const allowed = allowedTemplateGroupTypesForCursor(
+    activeBlock,
+    ENTITY_TEMPLATE_COMMANDS.map((spec) => spec.groupType),
+  );
 
   if (requestVersion !== insertTemplateContextVersion) {
     return;
@@ -1104,7 +1103,7 @@ async function insertEntityTemplate(spec: EntityTemplateCommandSpec): Promise<vo
 
   const text = editor.document.getText();
   const blocks = collectTopLevelGroupBlocks(text);
-  const activeBlock = findTopLevelGroupBlockAtPosition(text, blocks, editor.selection.active);
+  const activeBlock = findTopLevelGroupBlockAtLine(text, blocks, editor.selection.active.line);
   if (activeBlock && activeBlock.effectiveType !== spec.groupType) {
     void vscode.window.showWarningMessage(
       t(
@@ -1209,129 +1208,6 @@ function buildEntityTemplateInsertion(
 
 function hasOwnKey(root: Record<string, unknown> | null | undefined, key: string): boolean {
   return !!root && Object.prototype.hasOwnProperty.call(root, key);
-}
-
-function buildEntityGroupInsertionPrefix(text: string, eol: string): string {
-  let prefix = "";
-  if (text.trim().length > 0) {
-    if (!text.endsWith("\n") && !text.endsWith("\r\n")) {
-      prefix += eol;
-    }
-    if (!(text.endsWith(`${eol}${eol}`) || prefix === `${eol}${eol}`)) {
-      prefix += eol;
-    }
-  }
-  return prefix;
-}
-
-function collectExistingEntityNames(text: string, groupName: string): Set<string> {
-  const values = parseValuesObject(text);
-  const group = toMap(values[groupName]);
-  if (!group) {
-    return new Set<string>();
-  }
-  const names = new Set<string>();
-  for (const name of Object.keys(group)) {
-    if (name === "__GroupVars__") {
-      continue;
-    }
-    names.add(name);
-  }
-  return names;
-}
-
-function nextEntityName(existingNames: Set<string>, base: string): string {
-  let idx = 1;
-  while (existingNames.has(`${base}-${idx}`)) {
-    idx += 1;
-  }
-  return `${base}-${idx}`;
-}
-
-function collectTopLevelGroupBlocks(text: string): TopLevelGroupBlock[] {
-  const lines = text.split(/\r?\n/);
-  const topLevelEntries: Array<{ name: string; startLine: number }> = [];
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = lines[i].match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
-    if (!m) {
-      continue;
-    }
-    if (m[1] === "global") {
-      continue;
-    }
-    topLevelEntries.push({ name: m[1], startLine: i });
-  }
-
-  const blocks: TopLevelGroupBlock[] = [];
-  for (let i = 0; i < topLevelEntries.length; i += 1) {
-    const entry = topLevelEntries[i];
-    const next = topLevelEntries[i + 1];
-    const endLine = next ? next.startLine : lines.length;
-    const effectiveType = entry.name.startsWith("apps-")
-      ? entry.name
-      : resolveEffectiveGroupType(text, entry.name);
-    blocks.push({
-      name: entry.name,
-      startLine: entry.startLine,
-      endLine,
-      effectiveType,
-    });
-  }
-  return blocks;
-}
-
-function findTopLevelGroupBlockAtPosition(
-  text: string,
-  blocks: TopLevelGroupBlock[],
-  position: vscode.Position,
-): TopLevelGroupBlock | undefined {
-  const lines = text.split(/\r?\n/);
-  const rawLine = lines[position.line] ?? "";
-  const trimmed = rawLine.trim();
-
-  const topLevelOnLine = rawLine.match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
-  if (topLevelOnLine) {
-    if (topLevelOnLine[1] === "global") {
-      return undefined;
-    }
-    return blocks.find((b) => b.name === topLevelOnLine[1]);
-  }
-
-  if ((trimmed.length === 0 || trimmed.startsWith("#")) && countIndent(rawLine) === 0) {
-    return undefined;
-  }
-
-  const appScope = findAppScopeAtLine(text, position.line);
-  if (appScope) {
-    return blocks.find((b) => b.name === appScope.group);
-  }
-
-  if (countIndent(rawLine) === 0) {
-    return undefined;
-  }
-
-  for (let i = position.line - 1; i >= 0; i -= 1) {
-    const m = lines[i].match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
-    if (!m) {
-      continue;
-    }
-    if (m[1] === "global") {
-      return undefined;
-    }
-    return blocks.find((b) => b.name === m[1]);
-  }
-
-  return undefined;
-}
-
-function findPreferredGroupNameByType(blocks: TopLevelGroupBlock[], groupType: string): string | null {
-  const exact = blocks.find((b) => b.name === groupType);
-  if (exact) {
-    return exact.name;
-  }
-  const custom = blocks.find((b) => b.effectiveType === groupType);
-  return custom ? custom.name : null;
 }
 
 function readBooleanByPath(root: Record<string, unknown>, pathParts: string[]): boolean {
@@ -3222,36 +3098,6 @@ function applyGroupAwareRootFiltering(items: vscode.CompletionItem[], effectiveG
     }
   }
   return items;
-}
-
-function resolveEffectiveGroupType(text: string, groupName: string): string {
-  if (groupName.startsWith("apps-")) {
-    return groupName;
-  }
-  try {
-    const parsed = YAML.parse(text) as unknown;
-    const root = toMap(parsed);
-    const group = root ? toMap(root[groupName]) : null;
-    const groupVars = group ? toMap(group.__GroupVars__) : null;
-    const rawType = groupVars ? groupVars.type : undefined;
-    if (typeof rawType === "string" && rawType.trim().length > 0) {
-      return rawType.trim();
-    }
-    if (isMap(rawType)) {
-      const env = (() => {
-        const global = root ? toMap(root.global) : null;
-        const e = global ? global.env : undefined;
-        return typeof e === "string" && e.trim().length > 0 ? e.trim() : "dev";
-      })();
-      const typed = resolveEnvMaps(rawType, env);
-      if (typeof typed === "string" && typed.trim().length > 0) {
-        return typed.trim();
-      }
-    }
-  } catch {
-    // ignore parse errors, fallback to raw group
-  }
-  return groupName;
 }
 
 function schemaPathForContext(text: string, contextPath: string[]): string[] {
