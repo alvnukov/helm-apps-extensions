@@ -99,6 +99,14 @@ test("configmaps and secrets allowlists match current renderer contract", () => 
   assert.equal(secrets.has("kind"), false);
 });
 
+test("pvcs allowlist includes extraSpec patch key", () => {
+  const pvcs = getAllowedAppRootKeysByGroup("apps-pvcs");
+  assert.ok(pvcs.has("storageClassName"));
+  assert.ok(pvcs.has("accessModes"));
+  assert.ok(pvcs.has("resources"));
+  assert.ok(pvcs.has("extraSpec"));
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");

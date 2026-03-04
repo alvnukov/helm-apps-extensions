@@ -265,7 +265,7 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-pvcs": {
     purpose: "Declares PersistentVolumeClaim resources.",
     purposeRu: "Описывает ресурсы PersistentVolumeClaim.",
-    keys: ["storageClassName", "accessModes", "resources"],
+    keys: ["storageClassName", "accessModes", "resources", "extraSpec"],
   },
   "apps-limit-range": {
     purpose: "Declares LimitRange policies.",
@@ -456,6 +456,7 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     storageClassName: { en: "Storage class used for PVC provisioning.", ru: "Storage class для provision PVC." },
     accessModes: { en: "PVC access mode list.", ru: "Список режимов доступа PVC." },
     resources: { en: "PVC requested storage resources.", ru: "Запрашиваемые storage-ресурсы PVC." },
+    extraSpec: { en: "Raw PVC spec patch for native fields not covered by helpers.", ru: "Raw-патч PVC spec для нативных полей, не покрытых хелперами." },
   },
   "apps-limit-range": {
     limits: { en: "Default and max/min resource bounds for namespace workloads.", ru: "Default и max/min resource-границы для workload-ов namespace." },
@@ -1018,6 +1019,19 @@ const RULES: DocRule[] = [
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-sections",
       example: "resources: |-\n  requests:\n    storage: 10Gi\n",
+    },
+  },
+  {
+    pattern: ["apps-pvcs", "*", "extraSpec"],
+    doc: {
+      title: "PVC Extra Spec Patch",
+      titleRu: "Дополнительный патч spec для PVC",
+      summary: "Raw fragment merged into generated PVC spec for native options not covered by helpers.",
+      summaryRu: "Raw-фрагмент, мержимый в сгенерированный PVC spec для нативных опций, не покрытых хелперами.",
+      type: "YAML block string | map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
+      example: "extraSpec:\n  volumeMode: Filesystem\n",
     },
   },
   {

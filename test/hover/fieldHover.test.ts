@@ -202,6 +202,12 @@ test("pvc resources field has pvc-specific doc", () => {
   assert.equal(resources?.title, "PVC Requested Resources");
 });
 
+test("pvc extraSpec field has pvc-specific doc", () => {
+  const extraSpec = findFieldDoc(["apps-pvcs", "data-volume", "extraSpec"]);
+  assert.ok(extraSpec);
+  assert.equal(extraSpec?.title, "PVC Extra Spec Patch");
+});
+
 test("configmaps and secrets expose group-specific helper docs", () => {
   const configEnvVars = findFieldDoc(["apps-configmaps", "cfg", "envVars"]);
   assert.ok(configEnvVars);

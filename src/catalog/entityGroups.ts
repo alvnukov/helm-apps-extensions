@@ -298,7 +298,7 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
   ],
   "apps-configmaps": ["data", "binaryData", "envVars", "extraFields"],
   "apps-secrets": ["type", "data", "envVars", "extraFields"],
-  "apps-pvcs": ["storageClassName", "accessModes", "resources"],
+  "apps-pvcs": ["storageClassName", "accessModes", "resources", "extraSpec"],
   "apps-limit-range": ["limits"],
   "apps-certificates": ["clusterIssuer", "host", "hosts"],
   "apps-dex-clients": ["redirectURIs"],

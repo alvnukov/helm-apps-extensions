@@ -327,6 +327,9 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "    resources: |-",
         "      requests:",
         "        storage: 10Gi",
+        "    # Optional: pass native PVC spec fields not covered above",
+        "    extraSpec:",
+        "      volumeMode: Filesystem",
       ]);
 
     case "apps-limit-range":

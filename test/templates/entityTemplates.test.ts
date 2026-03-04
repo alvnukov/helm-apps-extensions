@@ -58,7 +58,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-pvcs",
-    mustContain: ["    storageClassName: gp3", "    accessModes: |-", "    resources: |-"],
+    mustContain: ["    storageClassName: gp3", "    accessModes: |-", "    resources: |-", "    extraSpec:", "      volumeMode: Filesystem"],
   },
   {
     group: "apps-limit-range",
