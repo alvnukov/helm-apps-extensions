@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildFieldDocMarkdown, buildFieldDocMarkdownLocalized, findFieldDoc, findKeyPathAtPosition } from "../../src/hover/fieldHover";
+import { APP_ENTRY_GROUP_SET, BUILTIN_GROUP_TYPES, getAllowedAppRootKeysByGroup } from "../../src/catalog/entityGroups";
 
 test("finds path for nested key at cursor", () => {
   const yaml = `global:
@@ -262,4 +263,27 @@ test("deep labels key gets explicit labels hover instead of unknown", () => {
   const doc = findFieldDoc(["apps-infra", "node-users", "ops", "labels"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Labels");
+});
+
+test("catalog app-root keys are never marked as unusual fields", () => {
+  for (const group of BUILTIN_GROUP_TYPES) {
+    if (!APP_ENTRY_GROUP_SET.has(group)) {
+      continue;
+    }
+    const allowed = getAllowedAppRootKeysByGroup(group);
+    for (const key of allowed) {
+      const doc = findFieldDoc([group, "sample-app", key]);
+      assert.ok(doc, `${group}.${key}: doc should exist`);
+      assert.notEqual(
+        doc?.title,
+        "Field Is Unusual For This Group",
+        `${group}.${key}: should not be marked unusual`,
+      );
+      assert.notEqual(
+        doc?.titleRu,
+        "Ключ нетипичен для этой группы",
+        `${group}.${key}: should not be marked unusual (ru)`,
+      );
+    }
+  }
 });
