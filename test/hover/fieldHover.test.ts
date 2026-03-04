@@ -166,6 +166,26 @@ test("path-specific secret type doc overrides generic type", () => {
   assert.equal(doc?.title, "Secret Type");
 });
 
+test("secret/configmap immutable and stringData have explicit context docs", () => {
+  const configImmutable = findFieldDoc(["apps-configmaps", "cfg", "immutable"]);
+  assert.ok(configImmutable);
+  assert.equal(configImmutable?.title, "ConfigMap Immutable Flag");
+
+  const secretImmutable = findFieldDoc(["apps-secrets", "secret-main", "immutable"]);
+  assert.ok(secretImmutable);
+  assert.equal(secretImmutable?.title, "Secret Immutable Flag");
+
+  const stringData = findFieldDoc(["apps-secrets", "secret-main", "stringData"]);
+  assert.ok(stringData);
+  assert.equal(stringData?.title, "Secret StringData");
+});
+
+test("secret kind override has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-secrets", "secret-main", "kind"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Secret Kind Override");
+});
+
 test("path-specific network policy type doc overrides generic type", () => {
   const doc = findFieldDoc(["apps-network-policies", "deny-all", "type"]);
   assert.ok(doc);

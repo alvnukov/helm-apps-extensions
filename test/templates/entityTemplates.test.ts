@@ -47,7 +47,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-secrets",
-    mustContain: ["    _include: [\"apps-secrets-defaultSecret\"]", "    type: Opaque", "    data:", "    binaryData:"],
+    mustContain: ["    _include: [\"apps-secrets-defaultSecret\"]", "    type: Opaque", "    stringData:", "    data:", "    binaryData:", "    immutable: false"],
   },
   {
     group: "apps-pvcs",
