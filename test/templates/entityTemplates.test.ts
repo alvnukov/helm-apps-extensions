@@ -85,7 +85,15 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-kafka-strimzi",
-    mustContain: ["    priorityClassName: production-high", "    kafka:", "    zookeeper:", "    deckhouseMetrics:", "    topics:"],
+    mustContain: [
+      "    priorityClassName: production-high",
+      "    version: 3.7.0",
+      "    replicas: 3",
+      "    storage:",
+      "    zookeeper:",
+      "    deckhouseMetrics:",
+      "    topics:",
+    ],
   },
   {
     group: "apps-service-accounts",

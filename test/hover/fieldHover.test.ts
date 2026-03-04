@@ -60,10 +60,10 @@ test("returns unknown-field doc for custom key under app", () => {
   assert.equal(doc?.title, "Custom or Unknown Field");
 });
 
-test("returns resources doc for kafka-strimzi nested resources key", () => {
-  const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "kafka", "resources"]);
+test("returns resources doc for kafka-strimzi app resources key", () => {
+  const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "resources"]);
   assert.ok(doc);
-  assert.equal(doc?.title, "Resources");
+  assert.equal(doc?.title, "Kafka Broker Resources");
 });
 
 test("helper markdown includes docs link", () => {
@@ -82,9 +82,9 @@ test("envVars helper points to dedicated envVars docs section", () => {
 });
 
 test("resources helper has inline example in fallback-by-key mode", () => {
-  const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "kafka", "resources"]);
+  const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "resources"]);
   assert.ok(doc);
-  const md = buildFieldDocMarkdown(["apps-kafka-strimzi", "test-kafka", "kafka", "resources"], doc!);
+  const md = buildFieldDocMarkdown(["apps-kafka-strimzi", "test-kafka", "resources"], doc!);
   assert.ok(md.includes("requests:"));
   assert.ok(md.includes("limits:"));
 });
@@ -276,8 +276,8 @@ test("service-account nested binding subjects use specific RBAC doc", () => {
   assert.equal(doc?.title, "ClusterRoleBinding Subjects");
 });
 
-test("kafka-strimzi nested kafka version has specific doc", () => {
-  const doc = findFieldDoc(["apps-kafka-strimzi", "main", "kafka", "version"]);
+test("kafka-strimzi version has specific doc", () => {
+  const doc = findFieldDoc(["apps-kafka-strimzi", "main", "version"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Kafka Version");
 });
