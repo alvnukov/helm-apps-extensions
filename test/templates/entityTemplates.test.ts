@@ -108,7 +108,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-k8s-manifests",
-    mustContain: ["    apiVersion: v1", "    kind: ConfigMap", "    fieldsYAML:", "    extraFields:"],
+    mustContain: ["    apiVersion: v1", "    kind: ConfigMap", "    metadata:", "    data:", "    immutable: false", "    extraFields:"],
   },
 ];
 

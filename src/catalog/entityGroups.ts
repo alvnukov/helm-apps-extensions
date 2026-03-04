@@ -344,7 +344,18 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
     "extraFields",
     "apiVersion",
   ],
-  "apps-k8s-manifests": ["apiVersion", "kind", "spec", "fieldsYAML", "extraFields"],
+  "apps-k8s-manifests": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "data",
+    "stringData",
+    "binaryData",
+    "type",
+    "immutable",
+    "extraFields",
+  ],
 };
 
 export function getAllowedAppRootKeysByGroup(group: string): Set<string> {

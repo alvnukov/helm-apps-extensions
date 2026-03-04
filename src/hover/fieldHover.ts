@@ -371,7 +371,15 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-k8s-manifests": {
     purpose: "Declares universal Kubernetes manifests when no specialized group fits.",
     purposeRu: "Описывает универсальные Kubernetes манифесты, когда нет подходящей специализированной группы.",
-    keys: ["apiVersion", "kind", "spec", "fieldsYAML", "extraFields"],
+    keys: ["apiVersion", "kind", "metadata", "spec", "data", "stringData", "binaryData", "type", "immutable", "extraFields"],
+    notes: [
+      "Use dedicated top-level keys (`metadata/spec/data/stringData/...`) for known fields.",
+      "`extraFields` is for residual top-level fields that are not covered by dedicated keys.",
+    ],
+    notesRu: [
+      "Для известных полей используйте выделенные top-level ключи (`metadata/spec/data/stringData/...`).",
+      "`extraFields` используйте для остаточных top-level полей, не покрытых выделенными ключами.",
+    ],
   },
 };
 
@@ -542,8 +550,13 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
   "apps-k8s-manifests": {
     apiVersion: { en: "Target API version for universal manifest.", ru: "Целевая API версия для универсального манифеста." },
     kind: { en: "Target Kubernetes kind for universal manifest.", ru: "Целевой Kubernetes kind для универсального манифеста." },
+    metadata: { en: "Manifest metadata block (`name`, `labels`, `annotations`, etc).", ru: "Блок metadata манифеста (`name`, `labels`, `annotations` и т.д.)." },
     spec: { en: "Raw manifest spec body.", ru: "Raw тело spec манифеста." },
-    fieldsYAML: { en: "Additional raw top-level fields as YAML fragments.", ru: "Дополнительные raw top-level поля в виде YAML-фрагментов." },
+    data: { en: "Top-level `data` field for ConfigMap/Secret-like manifests.", ru: "Top-level поле `data` для ConfigMap/Secret-подобных манифестов." },
+    stringData: { en: "Top-level `stringData` field for Secret manifests.", ru: "Top-level поле `stringData` для Secret-манифестов." },
+    binaryData: { en: "Top-level `binaryData` field for ConfigMap/Secret manifests.", ru: "Top-level поле `binaryData` для ConfigMap/Secret манифестов." },
+    type: { en: "Top-level `type` field (commonly for Secret manifests).", ru: "Top-level поле `type` (обычно для Secret-манифестов)." },
+    immutable: { en: "Top-level `immutable` field for supported object kinds.", ru: "Top-level поле `immutable` для поддерживаемых kind-ов." },
     extraFields: { en: "Residual fields payload for fallback renderer.", ru: "Остаточный payload полей для fallback-рендера." },
   },
 };
@@ -1577,6 +1590,92 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-k8s-manifests", "*", "metadata"],
+    doc: {
+      title: "Manifest Metadata",
+      titleRu: "Metadata манифеста",
+      summary: "Top-level metadata block for universal manifest (`name`, `labels`, `annotations`, etc).",
+      summaryRu: "Top-level блок metadata универсального манифеста (`name`, `labels`, `annotations` и т.д.).",
+      type: "YAML block string | map | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/",
+      example: "metadata:\n  labels:\n    app.kubernetes.io/name: app-1\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "data"],
+    doc: {
+      title: "Manifest Top-level Data",
+      titleRu: "Top-level data манифеста",
+      summary: "Top-level `data` field for ConfigMap/Secret-like universal manifests.",
+      summaryRu: "Top-level поле `data` для ConfigMap/Secret-подобных универсальных манифестов.",
+      type: "YAML block string | map | env-map",
+      example: "data:\n  FEATURE_X: \"true\"\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "stringData"],
+    doc: {
+      title: "Manifest Top-level stringData",
+      titleRu: "Top-level stringData манифеста",
+      summary: "Top-level `stringData` field (typically for Secret manifests).",
+      summaryRu: "Top-level поле `stringData` (обычно для Secret-манифестов).",
+      type: "YAML block string | map | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/#working-with-secrets",
+      example: "stringData:\n  DB_PASSWORD: change-me\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "binaryData"],
+    doc: {
+      title: "Manifest Top-level binaryData",
+      titleRu: "Top-level binaryData манифеста",
+      summary: "Top-level `binaryData` field for binary payload in ConfigMap/Secret manifests.",
+      summaryRu: "Top-level поле `binaryData` для бинарного payload в ConfigMap/Secret манифестах.",
+      type: "YAML block string | map | env-map",
+      example: "binaryData:\n  truststore.jks: \"<base64-content>\"\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "type"],
+    doc: {
+      title: "Manifest Top-level Type",
+      titleRu: "Top-level type манифеста",
+      summary: "Top-level `type` field (commonly for Secret manifests).",
+      summaryRu: "Top-level поле `type` (чаще всего для Secret-манифестов).",
+      type: "string | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/#secret-types",
+      example: "type: Opaque\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "immutable"],
+    doc: {
+      title: "Manifest Top-level Immutable Flag",
+      titleRu: "Top-level флаг immutable манифеста",
+      summary: "Top-level `immutable` flag for object kinds that support immutable payload.",
+      summaryRu: "Top-level флаг `immutable` для kind-ов, поддерживающих неизменяемый payload.",
+      type: "bool | env-map",
+      example: "immutable: true\n",
+    },
+  },
+  {
+    pattern: ["apps-k8s-manifests", "*", "fieldsYAML"],
+    doc: {
+      title: "Legacy fieldsYAML Key",
+      titleRu: "Legacy-ключ fieldsYAML",
+      summary: "Use dedicated top-level keys (`metadata/spec/data/stringData/...`) instead of legacy `fieldsYAML`.",
+      summaryRu: "Используйте выделенные top-level ключи (`metadata/spec/data/stringData/...`) вместо legacy `fieldsYAML`.",
+      type: "map",
+      notes: [
+        "For unknown top-level fields use `extraFields`.",
+      ],
+      notesRu: [
+        "Для неизвестных top-level полей используйте `extraFields`.",
+      ],
+      example: "metadata:\n  labels:\n    app.kubernetes.io/name: app-1\n",
+    },
+  },
+  {
     pattern: ["*", "*", "enabled"],
     doc: {
       title: "Resource Toggle",
@@ -1722,10 +1821,10 @@ const RULES: DocRule[] = [
     pattern: ["*", "*", "fieldsYAML"],
     doc: {
       title: "Raw Fields YAML",
-      summary: "Additional raw fields merged into rendered resource body.",
+      summary: "Legacy helper map of YAML fragments used by compatibility renderers.",
       type: "map of YAML block strings",
       notes: [
-        "Used heavily by fallback and k8s-manifest style resources.",
+        "Prefer dedicated top-level keys in modern renderer contracts.",
       ],
       example: "fieldsYAML:\n  spec: |-\n    template:\n      spec:\n        hostNetwork: true\n",
     },
@@ -1735,8 +1834,15 @@ const RULES: DocRule[] = [
     doc: {
       title: "Residual Top-level Fields",
       summary: "Unknown/unmapped top-level fields preserved for universal manifest rendering.",
-      type: "YAML block string",
-      example: "extraFields: |-\n  roleRef:\n    kind: Role\n",
+      summaryRu: "Неизвестные/непокрытые top-level поля, сохраняемые при рендере универсального манифеста.",
+      type: "YAML block string | map | env-map",
+      notes: [
+        "Do not duplicate dedicated keys (`apiVersion`, `kind`, `metadata`, `spec`, `data`, `stringData`, `binaryData`, `type`, `immutable`) here.",
+      ],
+      notesRu: [
+        "Не дублируйте здесь выделенные ключи (`apiVersion`, `kind`, `metadata`, `spec`, `data`, `stringData`, `binaryData`, `type`, `immutable`).",
+      ],
+      example: "extraFields:\n  roleRef:\n    kind: Role\n",
     },
   },
   {

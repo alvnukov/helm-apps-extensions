@@ -129,6 +129,21 @@ test("certificates, dex and monitoring group allowlists cover renderer keys", ()
   assert.ok(dashboards.has("folder"));
 });
 
+test("k8s-manifests allowlist includes dedicated top-level manifest fields", () => {
+  const manifests = getAllowedAppRootKeysByGroup("apps-k8s-manifests");
+  assert.ok(manifests.has("apiVersion"));
+  assert.ok(manifests.has("kind"));
+  assert.ok(manifests.has("metadata"));
+  assert.ok(manifests.has("spec"));
+  assert.ok(manifests.has("data"));
+  assert.ok(manifests.has("stringData"));
+  assert.ok(manifests.has("binaryData"));
+  assert.ok(manifests.has("type"));
+  assert.ok(manifests.has("immutable"));
+  assert.ok(manifests.has("extraFields"));
+  assert.equal(manifests.has("fieldsYAML"), false);
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");

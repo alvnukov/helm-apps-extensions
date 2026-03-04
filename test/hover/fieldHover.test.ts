@@ -318,6 +318,23 @@ test("custom prometheus rules nested nodes have dedicated docs", () => {
   assert.equal(alertContent?.title, "Prometheus Alert Content");
 });
 
+test("k8s manifests dedicated top-level fields have explicit docs", () => {
+  const metadata = findFieldDoc(["apps-k8s-manifests", "raw-obj", "metadata"]);
+  assert.ok(metadata);
+  assert.equal(metadata?.title, "Manifest Metadata");
+
+  const topLevelData = findFieldDoc(["apps-k8s-manifests", "raw-obj", "data"]);
+  assert.ok(topLevelData);
+  assert.equal(topLevelData?.title, "Manifest Top-level Data");
+});
+
+test("k8s manifests legacy fieldsYAML is marked unusual with migration hint", () => {
+  const fieldsYaml = findFieldDoc(["apps-k8s-manifests", "raw-obj", "fieldsYAML"]);
+  assert.ok(fieldsYaml);
+  assert.equal(fieldsYaml?.title, "Field Is Unusual For This Group");
+  assert.ok((fieldsYaml?.notes ?? []).some((note) => note.includes("dedicated top-level keys")));
+});
+
 test("service-account namespace has explicit context doc", () => {
   const doc = findFieldDoc(["apps-service-accounts", "runtime", "namespace"]);
   assert.ok(doc);
