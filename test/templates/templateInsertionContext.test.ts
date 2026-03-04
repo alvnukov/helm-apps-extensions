@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   allowedTemplateGroupTypesForCursor,
   buildEntityGroupInsertionPrefix,
+  canInsertGroupScaffold,
   collectExistingEntityNames,
   collectTopLevelGroupBlocks,
   findPreferredGroupNameByType,
@@ -78,4 +79,13 @@ test("buildEntityGroupInsertionPrefix keeps one blank separator", () => {
   assert.equal(buildEntityGroupInsertionPrefix("", "\n"), "");
   assert.equal(buildEntityGroupInsertionPrefix("apps-stateless:\n", "\n"), "\n");
   assert.equal(buildEntityGroupInsertionPrefix("apps-stateless:\n\n", "\n"), "");
+});
+
+test("canInsertGroupScaffold detects when apps-infra already has both sections", () => {
+  const filled = `apps-infra:\n  node-users:\n    deploy:\n      uid: 1001\n  node-groups:\n    workers: {}\n`;
+  assert.equal(canInsertGroupScaffold(filled, "apps-infra", "apps-infra"), false);
+
+  const partial = `apps-infra:\n  node-users:\n    deploy:\n      uid: 1001\n`;
+  assert.equal(canInsertGroupScaffold(partial, "apps-infra", "apps-infra"), true);
+  assert.equal(canInsertGroupScaffold(partial, "apps-stateless", "apps-stateless"), true);
 });

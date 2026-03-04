@@ -149,6 +149,24 @@ export function buildEntityGroupInsertionPrefix(text: string, eol: string): stri
   return prefix;
 }
 
+export function canInsertGroupScaffold(
+  text: string,
+  groupName: string,
+  groupType: string,
+): boolean {
+  if (groupType !== "apps-infra") {
+    return true;
+  }
+  const values = parseValuesObject(text);
+  const group = toMap(values[groupName]);
+  if (!group) {
+    return true;
+  }
+  const hasNodeUsers = hasOwnKey(group, "node-users");
+  const hasNodeGroups = hasOwnKey(group, "node-groups");
+  return !(hasNodeUsers && hasNodeGroups);
+}
+
 function countIndent(line: string): number {
   const m = line.match(/^(\s*)/);
   return m ? m[1].length : 0;
@@ -202,4 +220,8 @@ function toMap(value: unknown): Record<string, unknown> | null {
 
 function isMap(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOwnKey(root: Record<string, unknown> | null | undefined, key: string): boolean {
+  return !!root && Object.prototype.hasOwnProperty.call(root, key);
 }

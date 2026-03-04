@@ -35,6 +35,7 @@ import { renderAppsInfraTemplateLines, renderEntityTemplateLines } from "./templ
 import {
   allowedTemplateGroupTypesForCursor,
   buildEntityGroupInsertionPrefix,
+  canInsertGroupScaffold,
   collectExistingEntityNames,
   collectTopLevelGroupBlocks,
   findPreferredGroupNameByType,
@@ -1059,10 +1060,26 @@ async function refreshInsertTemplateContext(editor: vscode.TextEditor | undefine
 
   const blocks = collectTopLevelGroupBlocks(text);
   const activeBlock = findTopLevelGroupBlockAtLine(text, blocks, activeEditor.selection.active.line);
-  const allowed = allowedTemplateGroupTypesForCursor(
+  const scopedAllowed = allowedTemplateGroupTypesForCursor(
     activeBlock,
     ENTITY_TEMPLATE_COMMANDS.map((spec) => spec.groupType),
   );
+  const allowed = new Set<string>();
+  for (const spec of ENTITY_TEMPLATE_COMMANDS) {
+    if (!scopedAllowed.has(spec.groupType)) {
+      continue;
+    }
+    if (spec.insertionMode !== "groupScaffold") {
+      allowed.add(spec.groupType);
+      continue;
+    }
+    const targetGroupName = activeBlock?.name
+      ?? findPreferredGroupNameByType(blocks, spec.groupType)
+      ?? spec.groupType;
+    if (canInsertGroupScaffold(text, targetGroupName, spec.groupType)) {
+      allowed.add(spec.groupType);
+    }
+  }
 
   if (requestVersion !== insertTemplateContextVersion) {
     return;
