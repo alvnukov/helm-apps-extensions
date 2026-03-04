@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build happ (debug)",
+      "type": "shell",
+      "command": "cargo build --bin happ",
+      "options": {
+        "cwd": "/Users/zol/src/happ"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build extension + happ (debug)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "npm: build",
+        "build happ (debug)"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

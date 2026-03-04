@@ -62,8 +62,9 @@ export function validateUnexpectedNativeLists(text: string, options: ValidationO
     if (/^\s*-\s+/.test(raw)) {
       const path = toValuesPath(stack.map((s) => s.key));
       const key = stack.length > 0 ? stack[stack.length - 1].key : "";
+      const parentKey = stack.length > 1 ? stack[stack.length - 2].key : "";
 
-      if (!isAllowedListPath(path, key, !!options.allowNativeListsInBuiltInListFields)) {
+      if (!isAllowedListPath(path, key, !!options.allowNativeListsInBuiltInListFields, parentKey)) {
         issues.push({
           code: "E_UNEXPECTED_LIST",
           message: "native YAML list is not allowed here",
@@ -92,14 +93,11 @@ function toValuesPath(keys: string[]): string {
   return `Values.${keys.join(".")}`;
 }
 
-export function isAllowedListPath(path: string, key: string, allowBuiltInLists: boolean): boolean {
+export function isAllowedListPath(path: string, key: string, allowBuiltInLists: boolean, parentKey = ""): boolean {
   if (key === "_include" || key === "_include_files") {
     return true;
   }
 
-  if (/^Values\.global\._includes\..*/.test(path)) {
-    return true;
-  }
   if (/^Values\.apps-kafka-strimzi\..*\.kafka\.brokers\.hosts\.[^.]+$/.test(path)) {
     return true;
   }
@@ -134,7 +132,7 @@ export function isAllowedListPath(path: string, key: string, allowBuiltInLists: 
     return true;
   }
 
-  if (allowBuiltInLists && BUILTIN_LIST_FIELDS.has(key)) {
+  if (allowBuiltInLists && (BUILTIN_LIST_FIELDS.has(key) || BUILTIN_LIST_FIELDS.has(parentKey))) {
     return true;
   }
 

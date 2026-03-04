@@ -47,10 +47,10 @@ test("returns dynamic doc for app entry node", () => {
   assert.equal(doc?.title, "App Entry");
 });
 
-test("returns schema-based doc for known key not in manual rules", () => {
+test("returns explicit doc for releases matrix", () => {
   const doc = findFieldDoc(["global", "releases"]);
   assert.ok(doc);
-  assert.equal(doc?.title, "Schema Field: releases");
+  assert.equal(doc?.title, "Release Matrix");
 });
 
 test("returns unknown-field doc for custom key under app", () => {
@@ -114,12 +114,12 @@ test("ignores key-like text inside block scalars", () => {
   assert.equal(path, null);
 });
 
-test("schema fallback is contextual for initContainers node", () => {
+test("initContainers node has explicit helper doc", () => {
   const path = ["apps-cronjobs", "cronjob-1", "initContainers"];
   const doc = findFieldDoc(path);
   assert.ok(doc);
-  assert.equal(doc?.title, "Schema Field: initContainers");
-  assert.ok(!(doc?.summary ?? "").includes("defined in values schema"));
+  assert.equal(doc?.title, "Init Containers Block");
+  assert.ok((doc?.summary ?? "").toLowerCase().includes("init"));
 });
 
 test("schema fallback for named map entry explains map item semantics", () => {
@@ -127,4 +127,53 @@ test("schema fallback for named map entry explains map item semantics", () => {
   const doc = findFieldDoc(path);
   assert.ok(doc);
   assert.ok((doc?.summary ?? "").includes("Named entry"));
+});
+
+test("nested _include does not fall back to unknown", () => {
+  const path = ["apps-stateless", "app-1", "containers", "app-1", "_include"];
+  const doc = findFieldDoc(path);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Include Profiles");
+});
+
+test("custom group resolves docs by __GroupVars__.type for nested fields", () => {
+  const yaml = `global:
+  env: dev
+my-apps:
+  __GroupVars__:
+    type: apps-stateless
+  app-1:
+    containers:
+      app-1:
+        image:
+          name: nginx
+`;
+  const path = ["my-apps", "app-1", "containers"];
+  const doc = findFieldDoc(path, { documentText: yaml });
+  assert.ok(doc);
+  assert.equal(doc?.title, "Containers Spec");
+});
+
+test("path-specific service type doc overrides generic type", () => {
+  const doc = findFieldDoc(["apps-services", "api", "type"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Service Type");
+});
+
+test("path-specific secret type doc overrides generic type", () => {
+  const doc = findFieldDoc(["apps-secrets", "app-secret", "type"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Secret Type");
+});
+
+test("path-specific network policy type doc overrides generic type", () => {
+  const doc = findFieldDoc(["apps-network-policies", "deny-all", "type"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Network Policy Renderer Type");
+});
+
+test("deep labels key gets explicit labels hover instead of unknown", () => {
+  const doc = findFieldDoc(["apps-infra", "node-users", "ops", "labels"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Labels");
 });

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -13,29 +14,33 @@ import { compareSemver, resolveHelmRepositoryURL } from "./library/repository";
 import { extractLocalIncludeBlock, trimPreview } from "./hover/includeHover";
 import { buildDependencyGraphModel } from "./language/dependencyGraph";
 import { buildHelmAppsDocumentSymbols } from "./language/documentSymbols";
-import { analyzeIncludes } from "./language/includeAnalysis";
 import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "./language/symbols";
 import { discoverEnvironments, findAppScopeAtLine, resolveEntityWithIncludes, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
 import { expandValuesWithFileIncludes, type IncludeDefinition } from "./loader/fileIncludes";
 import { extractAppChildToGlobalInclude, safeRenameAppKey } from "./refactor/appRefactor";
 import { ValuesStructureProvider } from "./structure/valuesTreeProvider";
 import { HelmAppsWorkbenchActionsProvider } from "./structure/workbenchActionsProvider";
-import { validateUnexpectedNativeLists } from "./validator/listPolicy";
 import { buildStarterChartFiles, isValidChartVersion, sanitizeChartName } from "./scaffold/chartScaffold";
+import { DEFAULT_HAPP_LSP_ARGS, HappLspClient, type HappPreviewTheme, type LanguageMode } from "./lsp/client";
+import { validateUnexpectedNativeLists } from "./validator/listPolicy";
+import { renderEntityTemplateLines } from "./templates/entityTemplates";
 
 const execFileAsync = promisify(execFile);
 let previewPanel: vscode.WebviewPanel | undefined;
 let previewMessageSubscription: vscode.Disposable | undefined;
-const includeDiagnostics = vscode.languages.createDiagnosticCollection("helm-apps.includes");
-const semanticDiagnostics = vscode.languages.createDiagnosticCollection("helm-apps.semantic");
+let entityPreviewState: EntityPreviewState | undefined;
+let previewRenderTimer: NodeJS.Timeout | undefined;
+let previewRenderVersion = 0;
+const manifestPreviewCache = new Map<string, string>();
+const MANIFEST_PREVIEW_CACHE_LIMIT = 24;
 let completionSchemaCache: JsonSchema | null = null;
 const chartDetectionCache = new Map<string, boolean>();
-const diagnosticsTimers = new Map<string, NodeJS.Timeout>();
-const diagnosticsRunVersion = new Map<string, number>();
-const largeDocWarnings = new Set<string>();
-const DIAGNOSTICS_DEBOUNCE_MS = 220;
-const MAX_DIAGNOSTIC_DOC_SIZE_BYTES = 512 * 1024;
 const HELM_APPS_DEP_NAME = "helm-apps";
+const happLspBootstrapOutput = vscode.window.createOutputChannel("helm-apps / happ-lsp bootstrap");
+const happLspClient = new HappLspClient(happLspBootstrapOutput);
+const listPolicyDiagnostics = vscode.languages.createDiagnosticCollection("helm-apps-list-policy");
+let previewThemeCache: HappPreviewTheme | null = null;
+let previewThemeFetchFailed = false;
 
 type JsonSchema = {
   $ref?: string;
@@ -57,7 +62,155 @@ interface PreviewOptions {
   applyIncludes: boolean;
   applyEnvResolution: boolean;
   showDiff: boolean;
+  renderMode: "values" | "manifest";
 }
+
+type EnvironmentDiscoveryModel = { literals: string[]; regexes: string[] };
+
+interface PreviewEntityGroup {
+  name: string;
+  apps: string[];
+}
+
+interface PreviewEntityMenuModel {
+  groups: PreviewEntityGroup[];
+  selectedGroup: string;
+  selectedApp: string;
+}
+
+interface EntityPreviewState {
+  documentUri: vscode.Uri;
+  group: string;
+  app: string;
+  options: PreviewOptions;
+}
+
+interface EntityExampleCommandDef {
+  command: string;
+  groupType: string;
+  appBase: string;
+  contextKey: string;
+}
+
+interface TopLevelGroupBlock {
+  name: string;
+  startLine: number;
+  endLine: number;
+  effectiveType: string;
+}
+
+const DEFAULT_PREVIEW_THEME: HappPreviewTheme = {
+  ui: {
+    bg: "#1e1f22",
+    surface: "#2b2d30",
+    surface2: "#323437",
+    surface3: "#25272a",
+    surface4: "#2f3238",
+    text: "#bcbec4",
+    muted: "#7e8288",
+    accent: "#7aa2ff",
+    accent2: "#6ed1bb",
+    border: "#3c3f41",
+    danger: "#ff8f8f",
+    ok: "#7ad8ab",
+    title: "#f3f4f7",
+    controlHoverBorder: "#455368",
+    controlFocusBorder: "#7f9de2",
+    controlFocusRing: "rgba(126,156,233,.24)",
+    quickEnvBg: "#20242b",
+    quickEnvBorder: "#353c48",
+    quickEnvText: "#cdd3dd",
+    quickEnvHoverBg: "#2b3240",
+    quickEnvHoverBorder: "#6a7890",
+  },
+  syntax: {
+    key: "#d19a66",
+    bool: "#c678dd",
+    number: "#d19a66",
+    comment: "#6a8f74",
+    string: "#98c379",
+    block: "#9aa5b1",
+  },
+};
+
+const INSERT_ENTITY_EXAMPLE_MENU_CONTEXT = "helmApps.insertEntityExample.visible";
+const ENTITY_EXAMPLE_COMMANDS: readonly EntityExampleCommandDef[] = [
+  {
+    command: "helm-apps.insertEntityExample.appsStateless",
+    groupType: "apps-stateless",
+    appBase: "app",
+    contextKey: "helmApps.insertEntityExample.appsStateless",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsStateful",
+    groupType: "apps-stateful",
+    appBase: "app",
+    contextKey: "helmApps.insertEntityExample.appsStateful",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsJobs",
+    groupType: "apps-jobs",
+    appBase: "job",
+    contextKey: "helmApps.insertEntityExample.appsJobs",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsCronjobs",
+    groupType: "apps-cronjobs",
+    appBase: "cronjob",
+    contextKey: "helmApps.insertEntityExample.appsCronjobs",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsServices",
+    groupType: "apps-services",
+    appBase: "service",
+    contextKey: "helmApps.insertEntityExample.appsServices",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsIngresses",
+    groupType: "apps-ingresses",
+    appBase: "ingress",
+    contextKey: "helmApps.insertEntityExample.appsIngresses",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsNetworkPolicies",
+    groupType: "apps-network-policies",
+    appBase: "policy",
+    contextKey: "helmApps.insertEntityExample.appsNetworkPolicies",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsConfigmaps",
+    groupType: "apps-configmaps",
+    appBase: "config",
+    contextKey: "helmApps.insertEntityExample.appsConfigmaps",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsSecrets",
+    groupType: "apps-secrets",
+    appBase: "secret",
+    contextKey: "helmApps.insertEntityExample.appsSecrets",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsPvcs",
+    groupType: "apps-pvcs",
+    appBase: "pvc",
+    contextKey: "helmApps.insertEntityExample.appsPvcs",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsServiceAccounts",
+    groupType: "apps-service-accounts",
+    appBase: "sa",
+    contextKey: "helmApps.insertEntityExample.appsServiceAccounts",
+  },
+  {
+    command: "helm-apps.insertEntityExample.appsK8sManifests",
+    groupType: "apps-k8s-manifests",
+    appBase: "manifest",
+    contextKey: "helmApps.insertEntityExample.appsK8sManifests",
+  },
+];
+let insertExampleContextTimer: NodeJS.Timeout | undefined;
+let insertExampleContextVersion = 0;
+let insertExampleContextStateKey = "";
 
 interface LibrarySettingDef {
   key: string;
@@ -148,6 +301,10 @@ const LIBRARY_SETTINGS: LibrarySettingDef[] = [
 ];
 
 export function activate(context: vscode.ExtensionContext): void {
+  void happLspClient.setAvailableContext(false);
+  void applyInsertExampleContextState(false, new Set<string>());
+  context.subscriptions.push(happLspBootstrapOutput);
+  context.subscriptions.push(listPolicyDiagnostics);
   const valuesStructure = new ValuesStructureProvider();
   const workbenchActions = new HelmAppsWorkbenchActionsProvider(vscode.env.language);
 
@@ -161,6 +318,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       valuesStructure.setDocument(editor?.document);
+      void refreshListPolicyDiagnosticsForDocument(editor?.document);
+      scheduleInsertExampleContextRefresh(editor, 10);
+    }),
+  );
+  context.subscriptions.push(
+    vscode.window.onDidChangeTextEditorSelection((event) => {
+      scheduleInsertExampleContextRefresh(event.textEditor, 40);
     }),
   );
 
@@ -168,10 +332,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeTextDocument((event) => {
       const active = vscode.window.activeTextEditor?.document;
       if (!active || event.document.uri.toString() !== active.uri.toString()) {
+        scheduleEntityPreviewRefreshFor(event.document, 90);
+        void refreshListPolicyDiagnosticsForDocument(event.document);
         return;
       }
       valuesStructure.setDocument(active);
-      scheduleRefreshDiagnostics(active);
+      scheduleEntityPreviewRefreshFor(event.document, 90);
+      void refreshListPolicyDiagnosticsForDocument(event.document);
+      scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 80);
     }),
   );
   context.subscriptions.push(
@@ -180,22 +348,21 @@ export function activate(context: vscode.ExtensionContext): void {
       if (p.endsWith("Chart.yaml") || p.includes(`${path.sep}templates${path.sep}`)) {
         chartDetectionCache.clear();
       }
-      scheduleRefreshDiagnostics(vscode.window.activeTextEditor?.document, 0);
+      scheduleEntityPreviewRefreshFor(document, 0);
+      void refreshListPolicyDiagnosticsForDocument(document);
+      scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 80);
     }),
   );
-  context.subscriptions.push(includeDiagnostics);
-  context.subscriptions.push(semanticDiagnostics);
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (!editor) {
-        includeDiagnostics.clear();
-        semanticDiagnostics.clear();
-        return;
-      }
-      scheduleRefreshDiagnostics(editor.document, 0);
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      listPolicyDiagnostics.delete(document.uri);
     }),
   );
-
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider({ language: "yaml" }, {
+      provideCodeActions: async (document, range, codeContext) => await provideCodeActions(document, range, codeContext),
+    }),
+  );
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider({ language: "yaml" }, {
       provideDefinition: async (document, position) => await provideDefinition(document, position),
@@ -216,11 +383,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerCompletionItemProvider({ language: "yaml" }, {
       provideCompletionItems: async (document, position) => await provideCompletionItems(document, position),
     }, " ", ":", "-"),
-  );
-  context.subscriptions.push(
-    vscode.languages.registerCodeActionsProvider({ language: "yaml" }, {
-      provideCodeActions: async (document, range, codeContext) => await provideCodeActions(document, range, codeContext),
-    }),
   );
   context.subscriptions.push(
     vscode.languages.registerDocumentSymbolProvider({ language: "yaml" }, {
@@ -244,12 +406,26 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!editor) {
         return;
       }
-      const def = await provideIncludeDefinition(editor.document, editor.selection.active);
-      if (!def) {
+      const locations = await vscode.commands.executeCommand<Array<vscode.Location | vscode.LocationLink>>(
+        "vscode.executeDefinitionProvider",
+        editor.document.uri,
+        editor.selection.active,
+      );
+      const first = firstDefinitionLocation(locations);
+      if (first) {
+        const targetDoc = await vscode.workspace.openTextDocument(first.uri);
+        const targetEditor = await vscode.window.showTextDocument(targetDoc, { preview: false });
+        targetEditor.selection = new vscode.Selection(first.range.start, first.range.start);
+        targetEditor.revealRange(first.range, vscode.TextEditorRevealType.InCenter);
+        return;
+      }
+
+      const localDef = await provideIncludeDefinition(editor.document, editor.selection.active);
+      if (!localDef) {
         void vscode.window.showWarningMessage(t("No include definition found under cursor", "Под курсором не найдено определение include"));
         return;
       }
-      const location = Array.isArray(def) ? def[0] : def;
+      const location = Array.isArray(localDef) ? localDef[0] : localDef;
       const targetDoc = await vscode.workspace.openTextDocument(location.uri);
       const targetEditor = await vscode.window.showTextDocument(targetDoc, { preview: false });
       targetEditor.selection = new vscode.Selection(location.range.start, location.range.start);
@@ -270,6 +446,13 @@ export function activate(context: vscode.ExtensionContext): void {
       await pasteClipboardAsHelmApps(editor);
     }),
   );
+  for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(spec.command, async () => {
+        await insertEntityExample(spec);
+      }),
+    );
+  }
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.openDependencyGraph", async () => {
       const editor = vscode.window.activeTextEditor;
@@ -316,25 +499,29 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      const text = editor.document.getText();
-      const scope = findAppScopeAtLine(text, editor.selection.active.line);
-      if (!scope) {
-        void vscode.window.showWarningMessage(t("Place cursor inside <group>.<app> block", "Установите курсор внутри блока <group>.<app>"));
-        return;
-      }
-
       try {
         const loaded = await loadExpandedValues(editor.document);
         const values = loaded.values;
+        const text = editor.document.getText();
+        const scope = findAppScopeAtLine(text, editor.selection.active.line);
+        const menu = buildPreviewEntityMenuModel(values, scope?.group ?? "", scope?.app ?? "");
+        if (menu.groups.length === 0) {
+          void vscode.window.showWarningMessage(t("No entities found in values file", "В values-файле не найдены сущности"));
+          return;
+        }
+
+        const targetGroup = scope?.group ?? menu.selectedGroup;
+        const targetApp = scope?.app ?? menu.selectedApp;
         const envDiscovery = discoverEnvironments(values);
         const defaultEnv = detectDefaultEnv(values, envDiscovery);
         const options: PreviewOptions = {
           env: defaultEnv,
           applyIncludes: true,
           applyEnvResolution: true,
-          showDiff: true,
+          showDiff: false,
+          renderMode: "values",
         };
-        showEntityPreview(scope.group, scope.app, values, envDiscovery, options, loaded.missingFiles.map((m) => m.rawPath));
+        showEntityPreview(editor.document, targetGroup, targetApp, options);
       } catch (err) {
         void vscode.window.showErrorMessage(`helm-apps preview failed: ${extractErrorMessage(err)}`);
       }
@@ -380,14 +567,16 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       try {
-        const symbol = findSymbolAtPosition(editor.document.getText(), editor.selection.active.line, editor.selection.active.character);
-        if (symbol) {
-          const edits = await provideRenameEdits(editor.document, editor.selection.active, newKey);
-          if (edits) {
-            await vscode.workspace.applyEdit(edits);
-            void vscode.window.showInformationMessage(`helm-apps: renamed '${symbol.name}' to '${newKey}'`);
-            return;
-          }
+        const lspEdit = await vscode.commands.executeCommand<vscode.WorkspaceEdit | null>(
+          "vscode.executeDocumentRenameProvider",
+          editor.document.uri,
+          editor.selection.active,
+          newKey,
+        );
+        if (lspEdit) {
+          await vscode.workspace.applyEdit(lspEdit);
+          void vscode.window.showInformationMessage(`helm-apps: renamed to '${newKey}'`);
+          return;
         }
       } catch (err) {
         void vscode.window.showWarningMessage(`helm-apps workspace rename fallback: ${extractErrorMessage(err)}`);
@@ -462,10 +651,293 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void configureSchema(context, true);
   valuesStructure.setDocument(vscode.window.activeTextEditor?.document);
-  scheduleRefreshDiagnostics(vscode.window.activeTextEditor?.document, 0);
+  scheduleInsertExampleContextRefresh(vscode.window.activeTextEditor, 0);
+  for (const document of vscode.workspace.textDocuments) {
+    void refreshListPolicyDiagnosticsForDocument(document);
+  }
+  void initializeLanguageFeatures(context);
 }
 
-export function deactivate(): void {}
+export function deactivate(): Thenable<void> | void {
+  return happLspClient.stop();
+}
+
+async function initializeLanguageFeatures(context: vscode.ExtensionContext): Promise<void> {
+  resetPreviewThemeState();
+  const cfg = getExtensionConfig();
+  const mode = cfg.get<LanguageMode>("languageServerMode", "happ");
+  const devHappPathOverride = await resolveDevHappPathOverride(context);
+  happLspBootstrapOutput.clear();
+  happLspBootstrapOutput.appendLine(`[${new Date().toISOString()}] initializeLanguageFeatures mode=${mode}`);
+  happLspBootstrapOutput.appendLine(`extensionMode=${context.extensionMode}`);
+  if (devHappPathOverride) {
+    happLspBootstrapOutput.appendLine(`dev happ override=${devHappPathOverride}`);
+  }
+  if (mode === "fallback") {
+    happLspBootstrapOutput.appendLine("languageServerMode=fallback; stopping happ client");
+    await happLspClient.stop();
+    applyLightFallbackMode();
+    return;
+  }
+
+  const happPath = cfg.get<string>("happPath", "happ").trim() || "happ";
+  const configuredArgs = cfg.get<string[]>("happLspArgs", DEFAULT_HAPP_LSP_ARGS);
+  const happArgsRaw = Array.isArray(configuredArgs)
+    ? configuredArgs.map((it) => String(it).trim()).filter((it) => it.length > 0)
+    : [];
+  const happArgs = normalizeHappLspArgs(happArgsRaw);
+  const args = happArgs.length > 0 ? happArgs : [...DEFAULT_HAPP_LSP_ARGS];
+  const pathCandidates = devHappPathOverride
+    ? [devHappPathOverride]
+    : await resolveHappPathCandidates(happPath);
+  if (devHappPathOverride) {
+    happLspBootstrapOutput.appendLine("development mode: using strict happ binary path");
+  }
+  happLspBootstrapOutput.appendLine(`configured happPath=${happPath}`);
+  happLspBootstrapOutput.appendLine(`lsp args=${JSON.stringify(args)}`);
+  happLspBootstrapOutput.appendLine(`path candidates=${JSON.stringify(pathCandidates)}`);
+
+  const startErrors: string[] = [];
+  for (const candidatePath of pathCandidates) {
+    // Validate candidate before LSP bootstrap to avoid starting incompatible binaries.
+    // Typical failure case: PATH points to older happ without `lsp` subcommand.
+    // eslint-disable-next-line no-await-in-loop
+    const preflight = await preflightHappLspCandidate(candidatePath);
+    if (!preflight.ok) {
+      happLspBootstrapOutput.appendLine(`skipped: ${candidatePath} :: ${preflight.reason}`);
+      startErrors.push(`${candidatePath}: ${preflight.reason}`);
+      continue;
+    }
+    happLspBootstrapOutput.appendLine(`trying: ${candidatePath}`);
+    const result = await happLspClient.start(context, candidatePath, args);
+    if (!result.started) {
+      happLspBootstrapOutput.appendLine(`failed: ${candidatePath} :: ${result.errorMessage ?? "unknown error"}`);
+      startErrors.push(`${candidatePath}: ${result.errorMessage ?? "unknown error"}`);
+      continue;
+    }
+    happLspBootstrapOutput.appendLine(
+      `started: ${candidatePath}; fullLanguageSupport=${result.fullLanguageSupport ? "true" : "false"}`,
+    );
+    if (candidatePath !== happPath) {
+      void vscode.window.showInformationMessage(
+        t(
+          `happ LSP started with fallback binary: ${candidatePath}`,
+          `happ LSP запущен через fallback-бинарник: ${candidatePath}`,
+        ),
+      );
+    }
+    if (result.fullLanguageSupport) {
+      return;
+    }
+    happLspBootstrapOutput.appendLine("happ LSP started in partial mode; lightweight client fallback remains active");
+    return;
+  }
+
+  if (startErrors.length > 0) {
+    const details = startErrors.join(" | ");
+    happLspBootstrapOutput.appendLine(`all candidates failed: ${details}`);
+    happLspBootstrapOutput.show(true);
+    void vscode.window.showWarningMessage(
+      t(
+        `happ LSP unavailable (${details}); switched to basic mode. See 'helm-apps / happ-lsp bootstrap' output.`,
+        `happ LSP недоступен (${details}); включён базовый режим. См. вывод 'helm-apps / happ-lsp bootstrap'.`,
+      ),
+    );
+  }
+  applyLightFallbackMode();
+}
+
+function applyLightFallbackMode(): void {
+  // Keep extension-side fallback intentionally lightweight when happ is unavailable.
+}
+
+function resetPreviewThemeState(): void {
+  previewThemeCache = null;
+  previewThemeFetchFailed = false;
+}
+
+function normalizeHappLspArgs(args: string[]): string[] {
+  return args.map((arg) => {
+    if (arg === "--stdio") {
+      return "--stdio=true";
+    }
+    return arg;
+  });
+}
+
+async function resolveHappPathCandidates(configuredPath: string): Promise<string[]> {
+  const primary = configuredPath.trim().length > 0 ? configuredPath.trim() : "happ";
+  const candidates: string[] = [];
+  const fallbackAbsPaths = new Set<string>();
+  const barePrimary = primary === "happ";
+
+  if (!barePrimary) {
+    candidates.push(primary);
+  }
+
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const root = folder.uri.fsPath;
+    fallbackAbsPaths.add(path.resolve(root, "../happ/target/debug/happ"));
+    fallbackAbsPaths.add(path.resolve(root, "../happ/target/release/happ"));
+  }
+
+  const home = process.env.HOME?.trim();
+  if (home && home.length > 0) {
+    fallbackAbsPaths.add(path.join(home, "src", "happ", "target", "debug", "happ"));
+    fallbackAbsPaths.add(path.join(home, "src", "happ", "target", "release", "happ"));
+  }
+
+  for (const absPath of fallbackAbsPaths) {
+    if (absPath === primary) {
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await access(absPath);
+      candidates.push(absPath);
+    } catch {
+      // ignore missing candidate
+    }
+  }
+
+  if (barePrimary) {
+    // Prefer local dev binaries first; use PATH `happ` only as last fallback.
+    candidates.push(primary);
+  }
+
+  return [...new Set(candidates)];
+}
+
+async function resolveDevHappPathOverride(context: vscode.ExtensionContext): Promise<string | undefined> {
+  if (context.extensionMode !== vscode.ExtensionMode.Development) {
+    return undefined;
+  }
+  const raw = process.env.HELM_APPS_DEV_HAPP_PATH?.trim() ?? "";
+  const candidates = [
+    raw,
+    "/Users/zol/src/happ/target/debug/happ",
+    path.resolve(context.extensionPath, "../happ/target/debug/happ"),
+    path.resolve(context.extensionPath, "../happ/target/release/happ"),
+    process.env.HOME ? path.join(process.env.HOME, "src", "happ", "target", "debug", "happ") : "",
+    process.env.HOME ? path.join(process.env.HOME, "src", "happ", "target", "release", "happ") : "",
+  ]
+    .map((it) => it.trim())
+    .filter((it) => it.length > 0);
+
+  for (const candidate of candidates) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // keep searching
+    }
+  }
+  return undefined;
+}
+
+type HappLspPreflight = {
+  ok: boolean;
+  reason: string;
+};
+
+async function preflightHappLspCandidate(candidatePath: string): Promise<HappLspPreflight> {
+  const execOpts = {
+    timeout: 8000,
+    maxBuffer: 1024 * 1024,
+  } as const;
+  const summarize = (err: unknown): string => {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "stderr" in err &&
+      typeof (err as { stderr?: unknown }).stderr === "string"
+    ) {
+      const line = (err as { stderr: string }).stderr
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s.length > 0);
+      if (line) {
+        return line;
+      }
+    }
+    return extractErrorMessage(err);
+  };
+  const supportsLspFromHelp = (text: string): boolean => /(^|\n)\s*lsp(\s|$)/m.test(text);
+  try {
+    const help = await execFileAsync(candidatePath, ["--help"], execOpts);
+    const combined = `${help.stdout ?? ""}\n${help.stderr ?? ""}`;
+    if (!supportsLspFromHelp(combined)) {
+      return { ok: false, reason: "missing lsp subcommand in --help" };
+    }
+  } catch (err) {
+    return { ok: false, reason: `--help failed (${summarize(err)})` };
+  }
+
+  try {
+    await execFileAsync(candidatePath, ["lsp", "--help"], execOpts);
+    return { ok: true, reason: "ok" };
+  } catch (err) {
+    return { ok: false, reason: `lsp --help failed (${summarize(err)})` };
+  }
+}
+
+async function refreshListPolicyDiagnosticsForDocument(document: vscode.TextDocument | undefined): Promise<void> {
+  if (!document) {
+    return;
+  }
+  if (document.languageId !== "yaml") {
+    listPolicyDiagnostics.delete(document.uri);
+    return;
+  }
+  if (!(await isHelmAppsValuesDocument(document))) {
+    listPolicyDiagnostics.delete(document.uri);
+    return;
+  }
+
+  const text = document.getText();
+  const values = parseValuesObject(text);
+  const allowBuiltInLists = readBooleanByPath(values, ["global", "validation", "allowNativeListsInBuiltInListFields"]);
+  const issues = validateUnexpectedNativeLists(text, {
+    allowNativeListsInBuiltInListFields: allowBuiltInLists,
+  });
+  const lines = text.split(/\r?\n/);
+  const diagnostics = issues.map((issue) => {
+    const lineIndex = Math.max(0, Math.min(lines.length - 1, issue.line - 1));
+    const lineText = lines[lineIndex] ?? "";
+    const listMarker = lineText.match(/^(\s*-\s*)/);
+    const startChar = listMarker ? listMarker[1].length - 2 : Math.max(0, lineText.search(/\S/));
+    const endChar = Math.min(lineText.length, startChar + 1);
+    const diagnostic = new vscode.Diagnostic(
+      new vscode.Range(
+        new vscode.Position(lineIndex, startChar),
+        new vscode.Position(lineIndex, Math.max(startChar + 1, endChar)),
+      ),
+      t(
+        `Native YAML list is not allowed here (${issue.path}). Use YAML block string: key: |-. Quick Fix: "Convert native list to YAML block string". For migration only: set global.validation.allowNativeListsInBuiltInListFields=true. Docs: docs/faq.md#2-почему-list-в-values-почти-везде-запрещены`,
+        `Native YAML list здесь запрещён (${issue.path}). Используйте YAML block string: key: |-. Быстрое исправление: "Convert native list to YAML block string". Только для миграции: global.validation.allowNativeListsInBuiltInListFields=true. Документация: docs/faq.md#2-почему-list-в-values-почти-везде-запрещены`,
+      ),
+      vscode.DiagnosticSeverity.Error,
+    );
+    diagnostic.source = "helm-apps";
+    diagnostic.code = issue.code;
+    return diagnostic;
+  });
+  listPolicyDiagnostics.set(document.uri, diagnostics);
+}
+
+function firstDefinitionLocation(
+  locations: Array<vscode.Location | vscode.LocationLink> | undefined,
+): vscode.Location | null {
+  if (!locations || locations.length === 0) {
+    return null;
+  }
+  const first = locations[0];
+  if (first instanceof vscode.Location) {
+    return first;
+  }
+  return new vscode.Location(first.targetUri, first.targetSelectionRange ?? first.targetRange);
+}
 
 async function configureSchema(context: vscode.ExtensionContext, silent = false): Promise<void> {
   const manualFileMatch = vscode.workspace.getConfiguration("helm-apps").get<string[]>("schemaFileMatch", []);
@@ -476,6 +948,11 @@ async function configureSchema(context: vscode.ExtensionContext, silent = false)
 
   const schemaUri = vscode.Uri.file(path.join(context.extensionPath, "schemas", "values.schema.json")).toString();
   const next = { ...current };
+  for (const existingSchemaUri of Object.keys(next)) {
+    if (shouldReplaceLegacyHelmAppsSchema(existingSchemaUri, schemaUri)) {
+      delete next[existingSchemaUri];
+    }
+  }
   if (fileMatch.length > 0) {
     next[schemaUri] = fileMatch;
   } else {
@@ -485,6 +962,7 @@ async function configureSchema(context: vscode.ExtensionContext, silent = false)
   try {
     await yamlConfig.update("schemas", next, vscode.ConfigurationTarget.Workspace);
     await configureYamlHoverBehavior();
+    await configureYamlSuggestionBehavior();
   } catch (err) {
     const message = extractErrorMessage(err);
     if (!silent) {
@@ -502,6 +980,29 @@ async function configureSchema(context: vscode.ExtensionContext, silent = false)
   }
 }
 
+function shouldReplaceLegacyHelmAppsSchema(existingSchemaUri: string, activeSchemaUri: string): boolean {
+  if (existingSchemaUri === activeSchemaUri) {
+    return false;
+  }
+  let uri: vscode.Uri;
+  try {
+    uri = vscode.Uri.parse(existingSchemaUri, true);
+  } catch {
+    return false;
+  }
+  if (uri.scheme !== "file") {
+    return false;
+  }
+  const fsPath = uri.fsPath.replace(/\\/g, "/").toLowerCase();
+  if (!fsPath.endsWith("/schemas/values.schema.json")) {
+    return false;
+  }
+  // Replace stale schema mappings from old helm-apps extension locations.
+  return fsPath.includes("/extensions/helm-apps/")
+    || fsPath.includes("/helm-apps-extensions/")
+    || (fsPath.includes("/.vscode/extensions/") && fsPath.includes("helm-apps"));
+}
+
 async function configureYamlHoverBehavior(): Promise<void> {
   const disableSchemaHover = vscode.workspace
     .getConfiguration("helm-apps")
@@ -514,6 +1015,22 @@ async function configureYamlHoverBehavior(): Promise<void> {
   if (current !== false) {
     await yamlConfig.update("hover", false, vscode.ConfigurationTarget.Workspace);
   }
+}
+
+async function configureYamlSuggestionBehavior(): Promise<void> {
+  const rootConfig = vscode.workspace.getConfiguration();
+  const current = (rootConfig.get<Record<string, unknown>>("[yaml]") ?? {}) as Record<string, unknown>;
+  if (current["editor.suggest.showSnippets"] === false) {
+    return;
+  }
+  await rootConfig.update(
+    "[yaml]",
+    {
+      ...current,
+      "editor.suggest.showSnippets": false,
+    },
+    vscode.ConfigurationTarget.Workspace,
+  );
 }
 
 async function openLibrarySettingsPanel(editor: vscode.TextEditor): Promise<void> {
@@ -571,6 +1088,262 @@ function parseValuesObject(text: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function scheduleInsertExampleContextRefresh(editor: vscode.TextEditor | undefined, delayMs: number): void {
+  const targetEditor = editor;
+  if (insertExampleContextTimer) {
+    clearTimeout(insertExampleContextTimer);
+  }
+  const requestVersion = ++insertExampleContextVersion;
+  insertExampleContextTimer = setTimeout(() => {
+    insertExampleContextTimer = undefined;
+    void refreshInsertExampleContext(targetEditor, requestVersion);
+  }, Math.max(0, delayMs));
+}
+
+async function refreshInsertExampleContext(editor: vscode.TextEditor | undefined, requestVersion: number): Promise<void> {
+  const activeEditor = editor ?? vscode.window.activeTextEditor;
+  if (!activeEditor || activeEditor.document.languageId !== "yaml") {
+    if (requestVersion === insertExampleContextVersion) {
+      await applyInsertExampleContextState(false, new Set<string>());
+    }
+    return;
+  }
+
+  const text = activeEditor.document.getText();
+  if (!looksLikeHelmAppsValuesText(text)) {
+    if (requestVersion === insertExampleContextVersion) {
+      await applyInsertExampleContextState(false, new Set<string>());
+    }
+    return;
+  }
+
+  const blocks = collectTopLevelGroupBlocks(text);
+  const activeBlock = findTopLevelGroupBlockAtPosition(text, blocks, activeEditor.selection.active);
+  const allowed = new Set<string>();
+  if (!activeBlock) {
+    for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+      allowed.add(spec.groupType);
+    }
+  } else if (ENTITY_EXAMPLE_COMMANDS.some((spec) => spec.groupType === activeBlock.effectiveType)) {
+    allowed.add(activeBlock.effectiveType);
+  }
+
+  if (requestVersion !== insertExampleContextVersion) {
+    return;
+  }
+  await applyInsertExampleContextState(allowed.size > 0, allowed);
+}
+
+async function applyInsertExampleContextState(visible: boolean, allowedTypes: Set<string>): Promise<void> {
+  const key = `${visible ? "1" : "0"}|${[...allowedTypes].sort().join(",")}`;
+  if (key === insertExampleContextStateKey) {
+    return;
+  }
+  insertExampleContextStateKey = key;
+  await vscode.commands.executeCommand("setContext", INSERT_ENTITY_EXAMPLE_MENU_CONTEXT, visible);
+  for (const spec of ENTITY_EXAMPLE_COMMANDS) {
+    await vscode.commands.executeCommand("setContext", spec.contextKey, allowedTypes.has(spec.groupType));
+  }
+}
+
+async function insertEntityExample(spec: EntityExampleCommandDef): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+  if (!(await isHelmAppsValuesDocument(editor.document))) {
+    void vscode.window.showWarningMessage(
+      t(
+        "Open helm-apps values.yaml to insert an entity template.",
+        "Откройте helm-apps values.yaml, чтобы вставить шаблон сущности.",
+      ),
+    );
+    return;
+  }
+
+  const text = editor.document.getText();
+  const blocks = collectTopLevelGroupBlocks(text);
+  const activeBlock = findTopLevelGroupBlockAtPosition(text, blocks, editor.selection.active);
+  if (activeBlock && activeBlock.effectiveType !== spec.groupType) {
+    void vscode.window.showWarningMessage(
+      t(
+        `Cursor is inside '${activeBlock.name}' (${activeBlock.effectiveType}); insert for '${spec.groupType}' is hidden in this context.`,
+        `Курсор находится в '${activeBlock.name}' (${activeBlock.effectiveType}); вставка '${spec.groupType}' в этом контексте недоступна.`,
+      ),
+    );
+    return;
+  }
+
+  const targetGroupName = activeBlock?.name
+    ?? findPreferredGroupNameByType(blocks, spec.groupType)
+    ?? spec.groupType;
+
+  const insertion = buildEntityExampleInsertion(editor.document, text, targetGroupName, spec);
+  const applied = await editor.edit((builder) => {
+    builder.insert(insertion.position, insertion.text);
+  });
+  if (!applied) {
+    return;
+  }
+  scheduleInsertExampleContextRefresh(editor, 30);
+  void vscode.window.showInformationMessage(
+    t(
+      `Inserted template '${targetGroupName}.${insertion.appName}' (${spec.groupType})`,
+      `Вставлен шаблон '${targetGroupName}.${insertion.appName}' (${spec.groupType})`,
+    ),
+  );
+}
+
+function buildEntityExampleInsertion(
+  document: vscode.TextDocument,
+  text: string,
+  targetGroupName: string,
+  spec: EntityExampleCommandDef,
+): { position: vscode.Position; text: string; appName: string } {
+  const lines = text.split(/\r?\n/);
+  const eol = document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+  const blocks = collectTopLevelGroupBlocks(text);
+  const targetBlock = blocks.find((b) => b.name === targetGroupName);
+  const existingAppNames = collectExistingEntityNames(text, targetGroupName);
+  const appName = nextEntityName(existingAppNames, spec.appBase);
+  const entityLines = renderEntityTemplateLines(spec.groupType, appName);
+  const entityText = `${entityLines.join(eol)}${eol}`;
+
+  if (targetBlock) {
+    return {
+      position: new vscode.Position(targetBlock.endLine, 0),
+      text: entityText,
+      appName,
+    };
+  }
+
+  let prefix = "";
+  if (text.trim().length > 0) {
+    if (!text.endsWith("\n") && !text.endsWith("\r\n")) {
+      prefix += eol;
+    }
+    if (!(text.endsWith(`${eol}${eol}`) || prefix === `${eol}${eol}`)) {
+      prefix += eol;
+    }
+  }
+  const groupText = `${targetGroupName}:${eol}${entityText}`;
+  return {
+    position: new vscode.Position(lines.length, 0),
+    text: `${prefix}${groupText}`,
+    appName,
+  };
+}
+
+function collectExistingEntityNames(text: string, groupName: string): Set<string> {
+  const values = parseValuesObject(text);
+  const group = toMap(values[groupName]);
+  if (!group) {
+    return new Set<string>();
+  }
+  const names = new Set<string>();
+  for (const name of Object.keys(group)) {
+    if (name === "__GroupVars__") {
+      continue;
+    }
+    names.add(name);
+  }
+  return names;
+}
+
+function nextEntityName(existingNames: Set<string>, base: string): string {
+  let idx = 1;
+  while (existingNames.has(`${base}-${idx}`)) {
+    idx += 1;
+  }
+  return `${base}-${idx}`;
+}
+
+function collectTopLevelGroupBlocks(text: string): TopLevelGroupBlock[] {
+  const lines = text.split(/\r?\n/);
+  const topLevelEntries: Array<{ name: string; startLine: number }> = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
+    if (!m) {
+      continue;
+    }
+    if (m[1] === "global") {
+      continue;
+    }
+    topLevelEntries.push({ name: m[1], startLine: i });
+  }
+
+  const blocks: TopLevelGroupBlock[] = [];
+  for (let i = 0; i < topLevelEntries.length; i += 1) {
+    const entry = topLevelEntries[i];
+    const next = topLevelEntries[i + 1];
+    const endLine = next ? next.startLine : lines.length;
+    const effectiveType = entry.name.startsWith("apps-")
+      ? entry.name
+      : resolveEffectiveGroupType(text, entry.name);
+    blocks.push({
+      name: entry.name,
+      startLine: entry.startLine,
+      endLine,
+      effectiveType,
+    });
+  }
+  return blocks;
+}
+
+function findTopLevelGroupBlockAtPosition(
+  text: string,
+  blocks: TopLevelGroupBlock[],
+  position: vscode.Position,
+): TopLevelGroupBlock | undefined {
+  const lines = text.split(/\r?\n/);
+  const rawLine = lines[position.line] ?? "";
+  const trimmed = rawLine.trim();
+
+  const topLevelOnLine = rawLine.match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
+  if (topLevelOnLine) {
+    if (topLevelOnLine[1] === "global") {
+      return undefined;
+    }
+    return blocks.find((b) => b.name === topLevelOnLine[1]);
+  }
+
+  if ((trimmed.length === 0 || trimmed.startsWith("#")) && countIndent(rawLine) === 0) {
+    return undefined;
+  }
+
+  const appScope = findAppScopeAtLine(text, position.line);
+  if (appScope) {
+    return blocks.find((b) => b.name === appScope.group);
+  }
+
+  if (countIndent(rawLine) === 0) {
+    return undefined;
+  }
+
+  for (let i = position.line - 1; i >= 0; i -= 1) {
+    const m = lines[i].match(/^([A-Za-z0-9_.-]+):\s*(.*)$/);
+    if (!m) {
+      continue;
+    }
+    if (m[1] === "global") {
+      return undefined;
+    }
+    return blocks.find((b) => b.name === m[1]);
+  }
+
+  return undefined;
+}
+
+function findPreferredGroupNameByType(blocks: TopLevelGroupBlock[], groupType: string): string | null {
+  const exact = blocks.find((b) => b.name === groupType);
+  if (exact) {
+    return exact.name;
+  }
+  const custom = blocks.find((b) => b.effectiveType === groupType);
+  return custom ? custom.name : null;
 }
 
 function readBooleanByPath(root: Record<string, unknown>, pathParts: string[]): boolean {
@@ -792,10 +1565,33 @@ async function validateCurrentFile(): Promise<void> {
   }
 
   try {
-    await refreshDiagnostics(document);
-    const include = includeDiagnostics.get(document.uri) ?? [];
-    const semantic = semanticDiagnostics.get(document.uri) ?? [];
-    const all = [...include, ...semantic];
+    if (!happLspClient.isRunning()) {
+      const parsed = YAML.parseDocument(document.getText());
+      const parseErrors = parsed.errors.length;
+      if (parseErrors === 0) {
+        void vscode.window.showInformationMessage(
+          t(
+            "Basic YAML validation passed. Install/start happ for semantic helm-apps diagnostics.",
+            "Базовая YAML-проверка пройдена. Для семантической диагностики helm-apps запустите happ.",
+          ),
+        );
+      } else {
+        void vscode.window.showWarningMessage(
+          t(
+            `YAML parse errors: ${parseErrors}. Install/start happ for semantic helm-apps diagnostics.`,
+            `Ошибки парсинга YAML: ${parseErrors}. Для семантической диагностики helm-apps запустите happ.`,
+          ),
+        );
+      }
+      return;
+    }
+
+    const fromEditors = vscode.languages.getDiagnostics(document.uri);
+    const scoped = fromEditors.filter((d) => {
+      const source = (d.source ?? "").toLowerCase();
+      return source.includes("happ") || source.includes("helm-apps");
+    });
+    const all = scoped.length > 0 ? scoped : fromEditors;
     const errors = all.filter((d) => d.severity === vscode.DiagnosticSeverity.Error).length;
     const warnings = all.filter((d) => d.severity === vscode.DiagnosticSeverity.Warning).length;
     const infos = all.filter((d) => d.severity === vscode.DiagnosticSeverity.Information).length;
@@ -1560,14 +2356,25 @@ async function rewriteEditorText(
 }
 
 function showEntityPreview(
+  document: vscode.TextDocument,
   group: string,
   app: string,
-  values: unknown,
-  envDiscovery: { literals: string[]; regexes: string[] },
   options: PreviewOptions,
-  missingFiles: string[],
 ): void {
   const title = `helm-apps preview: ${group}.${app}`;
+  entityPreviewState = {
+    documentUri: document.uri,
+    group,
+    app,
+    options: {
+      env: options.env,
+      applyIncludes: options.applyIncludes,
+      applyEnvResolution: options.applyEnvResolution,
+      showDiff: options.showDiff,
+      renderMode: options.renderMode,
+    },
+  };
+
   if (!previewPanel) {
     previewPanel = vscode.window.createWebviewPanel(
       "helmAppsResolvedEntityPreview",
@@ -1576,8 +2383,13 @@ function showEntityPreview(
       { enableFindWidget: true, enableScripts: true },
     );
     previewPanel.onDidDispose(() => {
+      if (previewRenderTimer) {
+        clearTimeout(previewRenderTimer);
+        previewRenderTimer = undefined;
+      }
       previewMessageSubscription?.dispose();
       previewMessageSubscription = undefined;
+      entityPreviewState = undefined;
       previewPanel = undefined;
     });
   } else {
@@ -1585,41 +2397,127 @@ function showEntityPreview(
     previewPanel.reveal(vscode.ViewColumn.Beside, true);
   }
 
-  let renderTimer: NodeJS.Timeout | undefined;
-  const render = () => {
-    if (renderTimer) {
-      clearTimeout(renderTimer);
-      renderTimer = undefined;
-    }
-    const payload = buildEntityPreviewPayload(values, group, app, options);
-    previewPanel!.webview.html = renderPreviewHtml(title, payload.yamlText, payload.diffSummary, envDiscovery, options, missingFiles);
-  };
-  const renderDebounced = () => {
-    if (renderTimer) {
-      clearTimeout(renderTimer);
-    }
-    renderTimer = setTimeout(() => {
-      renderTimer = undefined;
-      render();
-    }, 120);
-  };
-
   previewMessageSubscription?.dispose();
   previewMessageSubscription = previewPanel.webview.onDidReceiveMessage((msg: unknown) => {
     if (!isWebviewMessage(msg)) {
       return;
     }
-
-    if (msg.type === "optionsChanged") {
-      options.env = msg.env;
-      options.applyIncludes = msg.applyIncludes;
-      options.applyEnvResolution = msg.applyEnvResolution;
-      options.showDiff = msg.showDiff;
-      renderDebounced();
+    if (msg.type === "optionsChanged" && entityPreviewState) {
+      if (typeof msg.group === "string" && msg.group.trim().length > 0) {
+        entityPreviewState.group = msg.group;
+      }
+      if (typeof msg.app === "string" && msg.app.trim().length > 0) {
+        entityPreviewState.app = msg.app;
+      }
+      entityPreviewState.options = {
+        env: msg.env,
+        applyIncludes: msg.applyIncludes,
+        applyEnvResolution: msg.applyEnvResolution,
+        showDiff: false,
+        renderMode: msg.renderMode,
+      };
+      scheduleEntityPreviewRefresh(0);
     }
   });
 
-  render();
+  scheduleEntityPreviewRefresh(0);
+}
+
+function scheduleEntityPreviewRefreshFor(document: vscode.TextDocument, delayMs = 120): void {
+  if (!previewPanel || !entityPreviewState) {
+    return;
+  }
+  if (entityPreviewState.documentUri.toString() !== document.uri.toString()) {
+    return;
+  }
+  scheduleEntityPreviewRefresh(delayMs);
+}
+
+function scheduleEntityPreviewRefresh(delayMs = 120): void {
+  if (!previewPanel || !entityPreviewState) {
+    return;
+  }
+  if (previewRenderTimer) {
+    clearTimeout(previewRenderTimer);
+  }
+  previewRenderTimer = setTimeout(() => {
+    previewRenderTimer = undefined;
+    void renderEntityPreview();
+  }, Math.max(0, delayMs));
+}
+
+async function renderEntityPreview(): Promise<void> {
+  const panel = previewPanel;
+  const state = entityPreviewState;
+  if (!panel || !state) {
+    return;
+  }
+
+  const renderId = ++previewRenderVersion;
+  try {
+    const document = await vscode.workspace.openTextDocument(state.documentUri);
+    const documentText = document.getText();
+    const loaded = await loadExpandedValues(document);
+    const values = loaded.values;
+    const menuModel = buildPreviewEntityMenuModel(values, state.group, state.app);
+    if (menuModel.groups.length === 0) {
+      throw new Error("No entities found in values");
+    }
+    state.group = menuModel.selectedGroup;
+    state.app = menuModel.selectedApp;
+    const title = `helm-apps preview: ${state.group}.${state.app}`;
+    const envDiscovery = discoverEnvironments(values);
+    const previewTheme = await getPreviewThemeForRender();
+    const payload = buildEntityPreviewPayload(values, state.group, state.app, state.options);
+    let renderText = payload.yamlText;
+
+    if (state.options.renderMode === "manifest") {
+      const cacheKey = buildManifestPreviewCacheKey(document, state);
+      const cached = manifestPreviewCache.get(cacheKey);
+      if (cached) {
+        renderText = cached;
+      } else {
+        renderText = await renderManifestFromHappLsp(document, documentText, state);
+        cacheManifestPreview(cacheKey, renderText);
+      }
+    }
+
+    if (!previewPanel || previewPanel !== panel || !entityPreviewState || entityPreviewState !== state || renderId !== previewRenderVersion) {
+      return;
+    }
+    panel.title = title;
+    panel.webview.html = renderPreviewHtml(
+      title,
+      renderText,
+      payload.diffSummary,
+      envDiscovery,
+      state.options,
+      loaded.missingFiles.map((m) => m.rawPath),
+      menuModel,
+      previewTheme,
+    );
+  } catch (err) {
+    if (!previewPanel || previewPanel !== panel || !entityPreviewState || entityPreviewState !== state || renderId !== previewRenderVersion) {
+      return;
+    }
+    const message = extractErrorMessage(err);
+    const title = `helm-apps preview: ${state.group}.${state.app}`;
+    panel.title = title;
+    panel.webview.html = renderPreviewHtml(
+      title,
+      `# preview unavailable\n# ${message}`,
+      [],
+      { literals: [state.options.env], regexes: [] },
+      state.options,
+      [],
+      {
+        groups: [],
+        selectedGroup: state.group,
+        selectedApp: state.app,
+      },
+      DEFAULT_PREVIEW_THEME,
+    );
+  }
 }
 
 function buildEntityPreviewPayload(
@@ -1630,12 +2528,141 @@ function buildEntityPreviewPayload(
 ): { yamlText: string; diffSummary: string[] } {
   const rawEntity = readRawEntity(values, group, app);
   const entity = resolvePreviewEntity(values, group, app, options);
+  const previewGlobal = buildPreviewGlobalProjection(values, entity, options.env);
   const diffSummary = options.showDiff ? diffObjects(rawEntity, entity) : [];
   const yamlText = YAML.stringify({
-    global: { env: options.env },
+    global: previewGlobal,
     [group]: { [app]: entity },
   });
   return { yamlText, diffSummary };
+}
+
+async function renderManifestFromHappLsp(
+  document: vscode.TextDocument,
+  documentText: string,
+  state: EntityPreviewState,
+): Promise<string> {
+  const result = await happLspClient.renderEntityManifest({
+    uri: document.uri.toString(),
+    text: documentText,
+    group: state.group,
+    app: state.app,
+    env: state.options.env,
+    applyIncludes: state.options.applyIncludes,
+    applyEnvResolution: state.options.applyEnvResolution,
+  });
+  const text = result.manifest.trim();
+  if (text.length === 0) {
+    throw new Error("happ LSP returned empty manifest output");
+  }
+  return text.endsWith("\n") ? text : `${text}\n`;
+}
+
+function buildManifestPreviewCacheKey(
+  document: vscode.TextDocument,
+  state: EntityPreviewState,
+): string {
+  return [
+    document.uri.toString(),
+    String(document.version),
+    state.group,
+    state.app,
+    state.options.env,
+    state.options.applyIncludes ? "1" : "0",
+    state.options.applyEnvResolution ? "1" : "0",
+  ].join("|");
+}
+
+function cacheManifestPreview(key: string, value: string): void {
+  if (manifestPreviewCache.has(key)) {
+    manifestPreviewCache.delete(key);
+  }
+  manifestPreviewCache.set(key, value);
+  while (manifestPreviewCache.size > MANIFEST_PREVIEW_CACHE_LIMIT) {
+    const oldest = manifestPreviewCache.keys().next().value as string | undefined;
+    if (!oldest) {
+      break;
+    }
+    manifestPreviewCache.delete(oldest);
+  }
+}
+
+async function getPreviewThemeForRender(): Promise<HappPreviewTheme> {
+  if (previewThemeCache) {
+    return previewThemeCache;
+  }
+  if (!happLspClient.isRunning() || previewThemeFetchFailed) {
+    return DEFAULT_PREVIEW_THEME;
+  }
+  try {
+    const theme = await happLspClient.getPreviewTheme();
+    previewThemeCache = sanitizePreviewTheme(theme);
+    return previewThemeCache;
+  } catch (err) {
+    previewThemeFetchFailed = true;
+    happLspBootstrapOutput.appendLine(`[preview-theme] fallback to built-in theme: ${extractErrorMessage(err)}`);
+    return DEFAULT_PREVIEW_THEME;
+  }
+}
+
+function sanitizePreviewTheme(theme: unknown): HappPreviewTheme {
+  const root = (theme && typeof theme === "object" ? theme : {}) as {
+    ui?: Record<string, unknown>;
+    syntax?: Record<string, unknown>;
+  };
+  const ui = root.ui ?? {};
+  const syntax = root.syntax ?? {};
+  const fallback = DEFAULT_PREVIEW_THEME;
+  return {
+    ui: {
+      bg: sanitizeCssColor(ui.bg, fallback.ui.bg),
+      surface: sanitizeCssColor(ui.surface, fallback.ui.surface),
+      surface2: sanitizeCssColor(ui.surface2, fallback.ui.surface2),
+      surface3: sanitizeCssColor(ui.surface3, fallback.ui.surface3),
+      surface4: sanitizeCssColor(ui.surface4, fallback.ui.surface4),
+      text: sanitizeCssColor(ui.text, fallback.ui.text),
+      muted: sanitizeCssColor(ui.muted, fallback.ui.muted),
+      accent: sanitizeCssColor(ui.accent, fallback.ui.accent),
+      accent2: sanitizeCssColor(ui.accent2, fallback.ui.accent2),
+      border: sanitizeCssColor(ui.border, fallback.ui.border),
+      danger: sanitizeCssColor(ui.danger, fallback.ui.danger),
+      ok: sanitizeCssColor(ui.ok, fallback.ui.ok),
+      title: sanitizeCssColor(ui.title, fallback.ui.title),
+      controlHoverBorder: sanitizeCssColor(ui.controlHoverBorder, fallback.ui.controlHoverBorder),
+      controlFocusBorder: sanitizeCssColor(ui.controlFocusBorder, fallback.ui.controlFocusBorder),
+      controlFocusRing: sanitizeCssColor(ui.controlFocusRing, fallback.ui.controlFocusRing),
+      quickEnvBg: sanitizeCssColor(ui.quickEnvBg, fallback.ui.quickEnvBg),
+      quickEnvBorder: sanitizeCssColor(ui.quickEnvBorder, fallback.ui.quickEnvBorder),
+      quickEnvText: sanitizeCssColor(ui.quickEnvText, fallback.ui.quickEnvText),
+      quickEnvHoverBg: sanitizeCssColor(ui.quickEnvHoverBg, fallback.ui.quickEnvHoverBg),
+      quickEnvHoverBorder: sanitizeCssColor(ui.quickEnvHoverBorder, fallback.ui.quickEnvHoverBorder),
+    },
+    syntax: {
+      key: sanitizeCssColor(syntax.key, fallback.syntax.key),
+      bool: sanitizeCssColor(syntax.bool, fallback.syntax.bool),
+      number: sanitizeCssColor(syntax.number, fallback.syntax.number),
+      comment: sanitizeCssColor(syntax.comment, fallback.syntax.comment),
+      string: sanitizeCssColor(syntax.string, fallback.syntax.string),
+      block: sanitizeCssColor(syntax.block, fallback.syntax.block),
+    },
+  };
+}
+
+function sanitizeCssColor(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const raw = value.trim();
+  if (raw.length === 0 || raw.length > 60) {
+    return fallback;
+  }
+  if (/^#[0-9a-fA-F]{3,8}$/.test(raw)) {
+    return raw;
+  }
+  if (/^rgba?\(\s*[-+0-9.%\s,]+\)$/.test(raw)) {
+    return raw;
+  }
+  return fallback;
 }
 
 function resolvePreviewEntity(values: unknown, group: string, app: string, options: PreviewOptions): unknown {
@@ -1654,6 +2681,140 @@ function resolvePreviewEntity(values: unknown, group: string, app: string, optio
 function readRawEntity(values: unknown, group: string, app: string): unknown {
   const parsed = values as Record<string, unknown>;
   return (((parsed[group] as Record<string, unknown> | undefined) ?? {})[app] ?? {}) as unknown;
+}
+
+function buildPreviewEntityMenuModel(values: unknown, selectedGroup: string, selectedApp: string): PreviewEntityMenuModel {
+  const root = toMap(values);
+  const groups: PreviewEntityGroup[] = [];
+
+  if (root) {
+    for (const [groupName, groupValue] of Object.entries(root)) {
+      if (groupName === "global") {
+        continue;
+      }
+      const groupMap = toMap(groupValue);
+      if (!groupMap) {
+        continue;
+      }
+      const apps = Object.keys(groupMap).filter((appName) => appName !== "__GroupVars__");
+      if (apps.length === 0) {
+        continue;
+      }
+      groups.push({ name: groupName, apps });
+    }
+  }
+
+  if (groups.length === 0) {
+    return { groups, selectedGroup, selectedApp };
+  }
+
+  const nextGroup = groups.some((group) => group.name === selectedGroup) ? selectedGroup : groups[0].name;
+  const nextApps = groups.find((group) => group.name === nextGroup)?.apps ?? [];
+  const nextApp = nextApps.includes(selectedApp) ? selectedApp : (nextApps[0] ?? selectedApp);
+
+  return {
+    groups,
+    selectedGroup: nextGroup,
+    selectedApp: nextApp,
+  };
+}
+
+function buildPreviewGlobalProjection(
+  values: unknown,
+  entity: unknown,
+  env: string,
+): Record<string, unknown> {
+  const root = toMap(values);
+  const sourceGlobal = toMap(root?.global) ?? {};
+  const out: Record<string, unknown> = { env };
+
+  for (const section of ["validation", "labels", "deploy", "releases"] as const) {
+    const pruned = pruneDefaultish(sourceGlobal[section]);
+    if (pruned !== undefined) {
+      out[section] = pruned;
+    }
+  }
+
+  const referenced = collectReferencedGlobalKeys(entity);
+  for (const key of referenced) {
+    if (key === "env") {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(out, key)) {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(sourceGlobal, key)) {
+      out[key] = sourceGlobal[key];
+    }
+  }
+
+  return out;
+}
+
+function pruneDefaultish(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "boolean") {
+    return value ? true : undefined;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0 ? value : undefined;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => pruneDefaultish(item))
+      .filter((item) => item !== undefined);
+    return items.length > 0 ? items : undefined;
+  }
+  if (isMap(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const pruned = pruneDefaultish(nested);
+      if (pruned !== undefined) {
+        out[key] = pruned;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+  return value;
+}
+
+function collectReferencedGlobalKeys(entity: unknown): Set<string> {
+  const out = new Set<string>();
+  collectReferencedGlobalKeysInner(entity, out);
+  return out;
+}
+
+function collectReferencedGlobalKeysInner(value: unknown, out: Set<string>): void {
+  if (typeof value === "string") {
+    collectGlobalKeysFromTemplateString(value, out);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectReferencedGlobalKeysInner(item, out);
+    }
+    return;
+  }
+  if (isMap(value)) {
+    for (const nested of Object.values(value)) {
+      collectReferencedGlobalKeysInner(nested, out);
+    }
+  }
+}
+
+function collectGlobalKeysFromTemplateString(text: string, out: Set<string>): void {
+  const re = /(?:\$?\s*\.)?Values\.global\.([A-Za-z0-9_-]+)/g;
+  for (const match of text.matchAll(re)) {
+    const key = (match[1] ?? "").trim();
+    if (key.length > 0) {
+      out.add(key);
+    }
+  }
 }
 
 async function loadExpandedValues(document: vscode.TextDocument): Promise<{
@@ -1717,11 +2878,22 @@ async function provideIncludeDefinition(
     return undefined;
   }
 
-  const loaded = await loadExpandedValues(document);
-  const map = indexIncludeDefinitions(document, loaded.values, loaded.includeDefinitions);
-  const loc = map.get(includeName);
-  if (loc) {
-    return loc;
+  // Always try local definitions first; this path should work even when YAML has parse issues.
+  const localDefs = findLocalGlobalIncludeLines(document);
+  const localLine = localDefs.get(includeName);
+  if (localLine !== undefined) {
+    return new vscode.Location(document.uri, new vscode.Position(localLine, 0));
+  }
+
+  try {
+    const loaded = await loadExpandedValues(document);
+    const map = indexIncludeDefinitions(document, loaded.values, loaded.includeDefinitions);
+    const loc = map.get(includeName);
+    if (loc) {
+      return loc;
+    }
+  } catch {
+    // Ignore parse/include expansion errors and continue with file-based lookup fallback.
   }
 
   return await findIncludeDefinitionInReferencedFiles(document, includeName);
@@ -2701,11 +3873,12 @@ async function provideIncludeHover(
 }
 
 function provideFieldHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
-  const path = findKeyPathAtPosition(document.getText(), position.line, position.character);
+  const documentText = document.getText();
+  const path = findKeyPathAtPosition(documentText, position.line, position.character);
   if (!path) {
     return undefined;
   }
-  const doc = findFieldDoc(path);
+  const doc = findFieldDoc(path, { documentText });
   if (!doc) {
     return undefined;
   }
@@ -2940,7 +4113,9 @@ function findLocalGlobalIncludeLines(document: vscode.TextDocument): Map<string,
   const lines = document.getText().split(/\r?\n/);
   const out = new Map<string, number>();
   let inGlobal = false;
-  let inIncludes = false;
+  let globalIndent = -1;
+  let includesIndent = -1;
+  let includeProfileIndent = -1;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -2955,16 +4130,43 @@ function findLocalGlobalIncludeLines(document: vscode.TextDocument): Map<string,
     const indent = m[1].length;
     const key = m[2];
 
-    if (indent === 0) {
+    if (!inGlobal) {
+      if (key === "global") {
+        inGlobal = true;
+        globalIndent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= globalIndent) {
       inGlobal = key === "global";
-      inIncludes = false;
+      globalIndent = inGlobal ? indent : -1;
+      includesIndent = -1;
+      includeProfileIndent = -1;
       continue;
     }
-    if (inGlobal && indent === 2) {
-      inIncludes = key === "_includes";
+
+    if (includesIndent < 0) {
+      if (key === "_includes") {
+        includesIndent = indent;
+        includeProfileIndent = -1;
+      }
       continue;
     }
-    if (inGlobal && inIncludes && indent === 4) {
+
+    if (indent <= includesIndent) {
+      includesIndent = -1;
+      includeProfileIndent = -1;
+      if (key === "_includes") {
+        includesIndent = indent;
+      }
+      continue;
+    }
+
+    if (includeProfileIndent < 0) {
+      includeProfileIndent = indent;
+    }
+    if (indent === includeProfileIndent) {
       out.set(key, i);
     }
   }
@@ -2975,12 +4177,17 @@ function renderPreviewHtml(
   title: string,
   yamlText: string,
   diffSummary: string[],
-  envDiscovery: { literals: string[]; regexes: string[] },
+  envDiscovery: EnvironmentDiscoveryModel,
   options: PreviewOptions,
   missingFiles: string[],
+  menu: PreviewEntityMenuModel,
+  theme: HappPreviewTheme,
 ): string {
   const safeTitle = escapeHtml(title);
-  const optionsJson = escapeHtml(JSON.stringify(options));
+  const optionsJson = serializeJsonForInlineScript(options);
+  const menuJson = serializeJsonForInlineScript(menu);
+  const ui = theme.ui;
+  const syntax = theme.syntax;
   const literalEnvs = [...new Set([options.env, ...envDiscovery.literals].filter((v) => v.trim().length > 0))];
   const regexEnvOptions = envDiscovery.regexes
     .map((re) => {
@@ -3014,16 +4221,13 @@ function renderPreviewHtml(
         }
       </details>`
     : "";
-  const diffSection = options.showDiff
-    ? `<details open>
-        <summary>Semantic diff (raw vs resolved): ${diffSummary.length} change(s)</summary>
-        <div class="diff-list">${
-          diffSummary.length > 0
-            ? diffSummary.map((d) => `<div class="diff-item"><code>${escapeHtml(d)}</code></div>`).join("")
-            : `<div class="hint">no semantic changes</div>`
-        }</div>
-      </details>`
-    : "";
+  const renderModeValuesActive = options.renderMode === "values" ? "active" : "";
+  const renderModeManifestActive = options.renderMode === "manifest" ? "active" : "";
+  const renderModeValuesSelected = options.renderMode === "values" ? "true" : "false";
+  const renderModeManifestSelected = options.renderMode === "manifest" ? "true" : "false";
+  const hasEntities = menu.groups.length > 0;
+  const entityDisabled = hasEntities ? "" : "disabled";
+  const entityLabel = hasEntities ? `${menu.selectedGroup}.${menu.selectedApp}` : "no entities";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -3032,53 +4236,307 @@ function renderPreviewHtml(
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${safeTitle}</title>
     <style>
-      body { font-family: Menlo, Monaco, Consolas, "Courier New", monospace; padding: 12px; }
-      h2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0 0 12px; }
-      .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+      :root {
+        --bg: ${ui.bg};
+        --surface: ${ui.surface};
+        --surface-2: ${ui.surface2};
+        --surface-3: ${ui.surface3};
+        --surface-4: ${ui.surface4};
+        --text: ${ui.text};
+        --muted: ${ui.muted};
+        --accent: ${ui.accent};
+        --accent-2: ${ui.accent2};
+        --border: ${ui.border};
+        --danger: ${ui.danger};
+        --ok: ${ui.ok};
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 42px;
+        line-height: 1.04;
+        letter-spacing: -0.03em;
+        font-weight: 800;
+        color: ${ui.title};
+      }
+      .bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+        padding: 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
       label { font-size: 12px; }
-      input[type="text"] { min-width: 240px; }
+      input[type="text"] {
+        min-width: 240px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: var(--surface);
+        color: var(--text);
+        transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+      }
+      input[type="text"]:hover { border-color: ${ui.controlHoverBorder}; }
+      input[type="text"]:focus {
+        outline: none;
+        border-color: ${ui.controlFocusBorder};
+        box-shadow: 0 0 0 2px ${ui.controlFocusRing};
+      }
+      input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+      .entity-control { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+      .entity-trigger {
+        min-width: 300px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 8px 12px;
+        height: 36px;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+      }
+      .entity-trigger:hover { border-color: ${ui.controlHoverBorder}; }
+      .entity-trigger:focus {
+        outline: none;
+        border-color: ${ui.controlFocusBorder};
+        box-shadow: 0 0 0 2px ${ui.controlFocusRing};
+      }
+      .entity-trigger:disabled { opacity: 0.65; cursor: default; }
+      .entity-popup {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 30;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+        padding: 3px;
+        min-width: 260px;
+      }
+      .entity-menu {
+        min-width: 244px;
+        padding: 3px;
+        max-height: 260px;
+        overflow: auto;
+      }
+      .entity-submenu {
+        position: absolute;
+        top: 0;
+        left: calc(100% + 4px);
+        right: auto;
+        min-width: 240px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+        padding: 3px;
+      }
+      .entity-item {
+        width: 100%;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        border-radius: 6px;
+        padding: 7px 11px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+      .entity-item:hover { background: var(--surface-4); }
+      .entity-item.active { background: ${ui.quickEnvHoverBg}; color: ${ui.title}; }
+      .entity-item-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .entity-item-arrow { color: var(--muted); padding-left: 10px; font-size: 12px; }
+      .entity-empty { font-size: 12px; color: var(--muted); padding: 6px 8px; }
       .quick-envs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-      .quick-env { border: 1px solid #425276; background: #102142; color: #d8e6ff; border-radius: 999px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
-      .quick-env:hover { background: #17305f; }
-      .hint { font-size: 11px; opacity: 0.8; margin-top: 8px; }
-      .warn { font-size: 11px; color: #f2ad4e; margin-top: 8px; }
-      .diff-list { margin-top: 8px; border: 1px solid #2a3654; border-radius: 8px; padding: 8px; background: #0a152e; max-height: 180px; overflow: auto; }
+      .quick-env {
+        border: 1px solid ${ui.quickEnvBorder};
+        background: ${ui.quickEnvBg};
+        color: ${ui.quickEnvText};
+        border-radius: 999px;
+        font-size: 11px;
+        padding: 3px 10px;
+        cursor: pointer;
+        transition: background-color .16s ease, border-color .16s ease;
+      }
+      .quick-env:hover { border-color: ${ui.quickEnvHoverBorder}; background: ${ui.quickEnvHoverBg}; }
+      .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+      .warn { font-size: 11px; color: var(--danger); margin-top: 8px; }
+      .mode-tabs {
+        display: flex;
+        align-items: stretch;
+        width: 100%;
+        border-bottom: 1px solid var(--border);
+        overflow: hidden;
+        background: var(--surface-2);
+      }
+      .mode-tab {
+        flex: 1 1 0;
+        border: 0;
+        border-right: 1px solid var(--border);
+        background: var(--surface-2);
+        color: var(--muted);
+        padding: 8px 12px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 13px;
+        text-align: center;
+        position: relative;
+        transition: background-color .16s ease, color .16s ease;
+      }
+      .mode-tab:last-child { border-right: 0; }
+      .mode-tab:hover { background: var(--surface-4); color: var(--text); }
+      .mode-tab.active {
+        background: var(--surface);
+        color: ${ui.title};
+        font-weight: 600;
+        box-shadow: inset 1px 0 0 var(--border), inset -1px 0 0 var(--border);
+      }
+      .mode-tab.active:first-child { border-top-left-radius: 6px; }
+      .mode-tab.active:last-child { border-top-right-radius: 6px; }
+      .mode-tab.active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 2px;
+        background: ${ui.accent};
+      }
+      .mode-tab.active::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -1px;
+        height: 1px;
+        background: var(--surface);
+      }
+      .mode-tab:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 1px ${ui.controlFocusBorder};
+      }
+      .diff-list {
+        margin-top: 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        background: var(--surface-3);
+        max-height: 180px;
+        overflow: auto;
+      }
       .diff-item { font-size: 12px; margin-bottom: 4px; }
-      .render { margin-top: 10px; border: 1px solid #2a3654; border-radius: 8px; background: #081126; overflow: auto; max-height: calc(100vh - 260px); }
-      pre { margin: 0; padding: 14px; color: #d8e6ff; font-size: 12px; line-height: 1.45; white-space: pre; }
-      .y-key { color: #8dc3ff; font-weight: 600; }
-      .y-bool { color: #71f0b4; font-weight: 600; }
-      .y-num { color: #9bd2ff; }
-      .y-comment { color: #6782ac; font-style: italic; }
-      .y-string { color: #f7c27f; }
-      .y-block { color: #b2c6e6; font-weight: 600; }
+      .render-shell {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+      .render {
+        margin-top: 0;
+        border: 0;
+        border-radius: 0;
+        background: var(--surface);
+        overflow: auto;
+        max-height: calc(100vh - 260px);
+      }
+      pre {
+        margin: 0;
+        padding: 14px;
+        color: var(--text);
+        font-family: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre;
+      }
+      .y-key { color: ${syntax.key}; font-weight: 600; }
+      .y-bool { color: ${syntax.bool}; font-weight: 600; }
+      .y-num { color: ${syntax.number}; }
+      .y-comment { color: ${syntax.comment}; font-style: italic; }
+      .y-string { color: ${syntax.string}; }
+      .y-block { color: ${syntax.block}; font-weight: 600; }
       details { margin-bottom: 10px; }
-      summary { cursor: pointer; font-size: 12px; user-select: none; }
+      summary { cursor: pointer; font-size: 12px; user-select: none; color: var(--text); }
+      @media (max-width: 700px) {
+        .entity-control { width: 100%; }
+        .entity-trigger { min-width: 0; width: 100%; }
+      }
     </style>
   </head>
   <body>
     <h2>${safeTitle}</h2>
     <div class="bar">
+      <div class="entity-control">
+        <label for="entityTrigger">entity:</label>
+        <button id="entityTrigger" type="button" class="entity-trigger" ${entityDisabled}>${escapeHtml(entityLabel)}</button>
+        <div id="entityPopup" class="entity-popup" hidden>
+          <div id="groupMenu" class="entity-menu"></div>
+          <div id="appMenu" class="entity-submenu" hidden></div>
+        </div>
+      </div>
       <label>env:
         <input id="envInput" type="text" value="${escapeHtml(options.env)}" />
       </label>
-      <label><input id="applyIncludes" type="checkbox" ${options.applyIncludes ? "checked" : ""}/> apply includes</label>
-      <label><input id="applyEnvResolution" type="checkbox" ${options.applyEnvResolution ? "checked" : ""}/> resolve env maps</label>
-      <label><input id="showDiff" type="checkbox" ${options.showDiff ? "checked" : ""}/> show semantic diff</label>
     </div>
     ${quickEnvButtons}
+    <div class="render-shell">
+      <div class="mode-tabs" role="tablist" aria-label="render mode">
+        <button id="renderModeValues" type="button" class="mode-tab ${renderModeValuesActive}" data-mode="values" role="tab" aria-selected="${renderModeValuesSelected}">values</button>
+        <button id="renderModeManifest" type="button" class="mode-tab ${renderModeManifestActive}" data-mode="manifest" role="tab" aria-selected="${renderModeManifestSelected}">manifest</button>
+      </div>
+      <div class="render"><pre id="yamlPreview">${renderYamlHighlightedHtml(yamlText)}</pre></div>
+    </div>
     ${details}
-    ${diffSection}
-    <div class="render"><pre id="yamlPreview">${renderYamlHighlightedHtml(yamlText)}</pre></div>
     <script>
       const vscode = acquireVsCodeApi();
-      const options = JSON.parse("${optionsJson}");
+      const options = ${optionsJson};
+      const menu = ${menuJson};
       const envInput = document.getElementById("envInput");
       const quickEnvButtons = document.querySelectorAll(".quick-env");
-      const applyIncludes = document.getElementById("applyIncludes");
-      const applyEnvResolution = document.getElementById("applyEnvResolution");
-      const showDiff = document.getElementById("showDiff");
+      const renderModeTabs = document.querySelectorAll(".mode-tab");
+      const entityTrigger = document.getElementById("entityTrigger");
+      const entityPopup = document.getElementById("entityPopup");
+      const groupMenu = document.getElementById("groupMenu");
+      const appMenu = document.getElementById("appMenu");
+      let selectedGroup = menu.selectedGroup;
+      let selectedApp = menu.selectedApp;
+      let submenuGroup = menu.selectedGroup;
+      let selectedRenderMode = options.renderMode === "manifest" ? "manifest" : "values";
 
+      const emitDebounced = (() => {
+        let timer;
+        return () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            timer = undefined;
+            emit();
+          }, 120);
+        };
+      })();
+
+      envInput.addEventListener("input", emitDebounced);
       envInput.addEventListener("change", emit);
       envInput.addEventListener("keyup", (e) => {
         if (e.key === "Enter") {
@@ -3093,17 +4551,206 @@ function renderPreviewHtml(
           envInput.dispatchEvent(new Event("change"));
         });
       });
-      applyIncludes.addEventListener("change", emit);
-      applyEnvResolution.addEventListener("change", emit);
-      showDiff.addEventListener("change", emit);
+      renderModeTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const mode = tab.getAttribute("data-mode");
+          if (mode !== "values" && mode !== "manifest") {
+            return;
+          }
+          if (selectedRenderMode === mode) {
+            return;
+          }
+          selectedRenderMode = mode;
+          updateRenderModeTabs();
+          emit();
+        });
+      });
+      updateRenderModeTabs();
+      normalizeSelection();
+      if (entityTrigger && entityPopup && groupMenu && appMenu) {
+        updateEntityLabel();
+        renderGroupMenu();
+        renderAppMenu();
+
+        entityTrigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (entityTrigger.disabled) {
+            return;
+          }
+          if (entityPopup.hidden) {
+            openEntityPopup();
+            return;
+          }
+          closeEntityPopup();
+        });
+
+        entityPopup.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        document.addEventListener("click", closeEntityPopup);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeEntityPopup();
+          }
+        });
+      }
+
+      function normalizeSelection() {
+        if (!Array.isArray(menu.groups) || menu.groups.length === 0) {
+          return;
+        }
+        if (!menu.groups.some((group) => group.name === selectedGroup)) {
+          selectedGroup = menu.groups[0].name;
+        }
+        const apps = menu.groups.find((group) => group.name === selectedGroup)?.apps ?? [];
+        if (apps.length === 0) {
+          selectedApp = "";
+        } else if (!apps.includes(selectedApp)) {
+          selectedApp = apps[0];
+        }
+        if (!menu.groups.some((group) => group.name === submenuGroup)) {
+          submenuGroup = selectedGroup;
+        }
+      }
+
+      function openEntityPopup() {
+        if (!entityPopup || !appMenu) {
+          return;
+        }
+        submenuGroup = selectedGroup;
+        renderGroupMenu();
+        renderAppMenu();
+        entityPopup.hidden = false;
+        appMenu.hidden = false;
+      }
+
+      function closeEntityPopup() {
+        if (!entityPopup) {
+          return;
+        }
+        entityPopup.hidden = true;
+      }
+
+      function updateEntityLabel() {
+        if (!entityTrigger) {
+          return;
+        }
+        if (!selectedGroup || !selectedApp) {
+          entityTrigger.textContent = "no entities";
+          return;
+        }
+        entityTrigger.textContent = selectedGroup + "." + selectedApp;
+      }
+
+      function renderGroupMenu() {
+        if (!groupMenu) {
+          return;
+        }
+        groupMenu.innerHTML = "";
+        if (!Array.isArray(menu.groups) || menu.groups.length === 0) {
+          groupMenu.innerHTML = '<div class="entity-empty">no groups</div>';
+          return;
+        }
+
+        for (const group of menu.groups) {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "entity-item" + (group.name === submenuGroup ? " active" : "");
+          const label = document.createElement("span");
+          label.className = "entity-item-label";
+          label.textContent = group.name;
+          const arrow = document.createElement("span");
+          arrow.className = "entity-item-arrow";
+          arrow.textContent = "›";
+          item.appendChild(label);
+          item.appendChild(arrow);
+          const setSubmenu = () => {
+            submenuGroup = group.name;
+            renderGroupMenu();
+            renderAppMenu();
+          };
+          item.addEventListener("mouseenter", setSubmenu);
+          item.addEventListener("click", setSubmenu);
+          groupMenu.appendChild(item);
+        }
+      }
+
+      function renderAppMenu() {
+        if (!appMenu) {
+          return;
+        }
+        appMenu.innerHTML = "";
+
+        const apps = menu.groups.find((group) => group.name === submenuGroup)?.apps ?? [];
+        if (apps.length === 0) {
+          appMenu.innerHTML = '<div class="entity-empty">no apps</div>';
+          appMenu.hidden = false;
+          appMenu.style.left = "calc(100% + 4px)";
+          appMenu.style.right = "auto";
+          return;
+        }
+        appMenu.hidden = false;
+        const list = document.createElement("div");
+        list.className = "entity-menu";
+        for (const app of apps) {
+          const item = document.createElement("button");
+          item.type = "button";
+          const isCurrent = submenuGroup === selectedGroup && app === selectedApp;
+          item.className = "entity-item" + (isCurrent ? " active" : "");
+          const label = document.createElement("span");
+          label.className = "entity-item-label";
+          label.textContent = app;
+          item.appendChild(label);
+          item.addEventListener("click", () => {
+            selectedGroup = submenuGroup;
+            selectedApp = app;
+            updateEntityLabel();
+            closeEntityPopup();
+            emit();
+          });
+          list.appendChild(item);
+        }
+        appMenu.appendChild(list);
+        const activeGroupItem = groupMenu?.querySelector(".entity-item.active");
+        if (activeGroupItem instanceof HTMLElement) {
+          appMenu.style.top = activeGroupItem.offsetTop + "px";
+        } else {
+          appMenu.style.top = "0";
+        }
+        appMenu.style.left = "calc(100% + 4px)";
+        appMenu.style.right = "auto";
+        const popupRect = entityPopup?.getBoundingClientRect();
+        const submenuRect = appMenu.getBoundingClientRect();
+        if (popupRect && submenuRect.right > window.innerWidth - 8) {
+          appMenu.style.left = "auto";
+          appMenu.style.right = "calc(100% + 4px)";
+        }
+      }
 
       function emit() {
+        normalizeSelection();
+        const renderMode = selectedRenderMode;
+        const group = selectedGroup || menu.selectedGroup;
+        const app = selectedApp || menu.selectedApp;
         vscode.postMessage({
           type: "optionsChanged",
+          group,
+          app,
           env: envInput.value || options.env,
-          applyIncludes: applyIncludes.checked,
-          applyEnvResolution: applyEnvResolution.checked,
-          showDiff: showDiff.checked
+          applyIncludes: true,
+          applyEnvResolution: true,
+          showDiff: false,
+          renderMode
+        });
+      }
+
+      function updateRenderModeTabs() {
+        renderModeTabs.forEach((tab) => {
+          const mode = tab.getAttribute("data-mode");
+          const isActive = mode === selectedRenderMode;
+          tab.classList.toggle("active", isActive);
+          tab.setAttribute("aria-selected", isActive ? "true" : "false");
         });
       }
     </script>
@@ -3233,17 +4880,36 @@ function escapeHtml(input: string): string {
     .split(">").join("&gt;");
 }
 
+function serializeJsonForInlineScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 function isWebviewMessage(
   value: unknown,
-): value is { type: "optionsChanged"; env: string; applyIncludes: boolean; applyEnvResolution: boolean; showDiff: boolean } {
+): value is {
+  type: "optionsChanged";
+  group?: string;
+  app?: string;
+  env: string;
+  applyIncludes: boolean;
+  applyEnvResolution: boolean;
+  showDiff: boolean;
+  renderMode: "values" | "manifest";
+} {
   if (!value || typeof value !== "object") {
     return false;
   }
   const v = value as Record<string, unknown>;
   return v.type === "optionsChanged" && typeof v.env === "string"
+    && (v.group === undefined || typeof v.group === "string")
+    && (v.app === undefined || typeof v.app === "string")
     && typeof v.applyIncludes === "boolean"
     && typeof v.applyEnvResolution === "boolean"
-    && typeof v.showDiff === "boolean";
+    && typeof v.showDiff === "boolean"
+    && (v.renderMode === "values" || v.renderMode === "manifest");
 }
 
 function isMap(value: unknown): value is Record<string, unknown> {
@@ -3252,179 +4918,6 @@ function isMap(value: unknown): value is Record<string, unknown> {
 
 function toMap(value: unknown): Record<string, unknown> | null {
   return isMap(value) ? value : null;
-}
-
-async function refreshDiagnostics(document: vscode.TextDocument | undefined): Promise<void> {
-  if (!document) {
-    includeDiagnostics.clear();
-    semanticDiagnostics.clear();
-    return;
-  }
-  if (Buffer.byteLength(document.getText(), "utf8") > MAX_DIAGNOSTIC_DOC_SIZE_BYTES) {
-    includeDiagnostics.clear();
-    const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
-    const diag = new vscode.Diagnostic(
-      range,
-      t(
-        "Diagnostics paused for large file (>512KB). Reduce file size or split values for full checks.",
-        "Диагностика приостановлена для большого файла (>512KB). Уменьшите размер файла или разделите values для полной проверки.",
-      ),
-      vscode.DiagnosticSeverity.Information,
-    );
-    diag.source = "helm-apps";
-    semanticDiagnostics.set(document.uri, [diag]);
-    if (!largeDocWarnings.has(document.uri.toString())) {
-      largeDocWarnings.add(document.uri.toString());
-      void vscode.window.showWarningMessage(t("helm-apps: diagnostics paused for large file (>512KB).", "helm-apps: диагностика приостановлена для большого файла (>512KB)."));
-    }
-    return;
-  }
-  await refreshIncludeDiagnostics(document);
-  await refreshSemanticDiagnostics(document);
-}
-
-function scheduleRefreshDiagnostics(document: vscode.TextDocument | undefined, delayMs = DIAGNOSTICS_DEBOUNCE_MS): void {
-  if (!document) {
-    includeDiagnostics.clear();
-    semanticDiagnostics.clear();
-    return;
-  }
-  const key = document.uri.toString();
-  const prev = diagnosticsTimers.get(key);
-  if (prev) {
-    clearTimeout(prev);
-  }
-  const runId = (diagnosticsRunVersion.get(key) ?? 0) + 1;
-  diagnosticsRunVersion.set(key, runId);
-  const timer = setTimeout(() => {
-    diagnosticsTimers.delete(key);
-    void refreshDiagnostics(document).catch(() => {
-      // diagnostics errors should not break editing
-    });
-  }, Math.max(0, delayMs));
-  diagnosticsTimers.set(key, timer);
-}
-
-async function refreshIncludeDiagnostics(document: vscode.TextDocument | undefined): Promise<void> {
-  if (!document || document.languageId !== "yaml") {
-    includeDiagnostics.clear();
-    return;
-  }
-
-  const refs = collectIncludeFileRefs(document.getText());
-  const diagnostics: vscode.Diagnostic[] = [];
-
-  const ru = vscode.env.language.toLowerCase().startsWith("ru");
-  for (const ref of refs) {
-    if (isTemplatedIncludePath(ref.path)) {
-      continue;
-    }
-    const candidates = buildIncludeCandidates(ref.path, path.dirname(document.uri.fsPath));
-    let found = false;
-    for (const candidate of candidates) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await access(candidate);
-        found = true;
-        break;
-      } catch {
-        // try next candidate
-      }
-    }
-    if (found) {
-      continue;
-    }
-
-    const range = new vscode.Range(new vscode.Position(ref.line, 0), new vscode.Position(ref.line, 200));
-    const message = ru ? `Файл include не найден: ${ref.path}` : `Include file not found: ${ref.path}`;
-    const d = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Warning);
-    d.source = "helm-apps";
-    d.code = `E_INCLUDE_FILE_NOT_FOUND:${ref.path}`;
-    diagnostics.push(d);
-  }
-
-  includeDiagnostics.set(document.uri, diagnostics);
-}
-
-async function refreshSemanticDiagnostics(document: vscode.TextDocument | undefined): Promise<void> {
-  if (!document || document.languageId !== "yaml") {
-    semanticDiagnostics.clear();
-    return;
-  }
-  const docKey = document.uri.toString();
-  const runId = diagnosticsRunVersion.get(docKey) ?? 0;
-  if (!(await isHelmAppsValuesDocument(document))) {
-    semanticDiagnostics.clear();
-    return;
-  }
-
-  const text = document.getText();
-  const parsed = parseValuesObject(text);
-  const allowNativeListsInBuiltInListFields = readBooleanByPath(
-    parsed,
-    ["global", "validation", "allowNativeListsInBuiltInListFields"],
-  );
-  const loaded = await loadExpandedValues(document);
-  if ((diagnosticsRunVersion.get(docKey) ?? 0) !== runId) {
-    return;
-  }
-  const analysis = analyzeIncludes(text, loaded.includeDefinitions);
-  const diagnostics: vscode.Diagnostic[] = [];
-  const ru = vscode.env.language.toLowerCase().startsWith("ru");
-
-  for (const unresolved of analysis.unresolvedUsages) {
-    const lineText = document.lineAt(unresolved.line).text;
-    const idx = lineText.indexOf(unresolved.name);
-    const start = idx >= 0 ? idx : 0;
-    const end = idx >= 0 ? idx + unresolved.name.length : lineText.length;
-    const range = new vscode.Range(
-      new vscode.Position(unresolved.line, start),
-      new vscode.Position(unresolved.line, end),
-    );
-    const d = new vscode.Diagnostic(
-      range,
-      ru ? `Неразрешённый include-профиль: ${unresolved.name}` : `Unresolved include profile: ${unresolved.name}`,
-      vscode.DiagnosticSeverity.Warning,
-    );
-    d.source = "helm-apps";
-    d.code = `E_UNRESOLVED_INCLUDE:${unresolved.name}`;
-    diagnostics.push(d);
-  }
-
-  for (const unused of analysis.unusedDefinitions) {
-    const lineText = document.lineAt(unused.line).text;
-    const idx = lineText.indexOf(unused.name);
-    const start = idx >= 0 ? idx : 0;
-    const end = idx >= 0 ? idx + unused.name.length : lineText.length;
-    const range = new vscode.Range(
-      new vscode.Position(unused.line, start),
-      new vscode.Position(unused.line, end),
-    );
-    const d = new vscode.Diagnostic(
-      range,
-      ru ? `Неиспользуемый include-профиль: ${unused.name}` : `Unused include profile: ${unused.name}`,
-      vscode.DiagnosticSeverity.Information,
-    );
-    d.source = "helm-apps";
-    diagnostics.push(d);
-  }
-
-  const listIssues = validateUnexpectedNativeLists(text, { allowNativeListsInBuiltInListFields });
-  for (const issue of listIssues) {
-    const idxLine = Math.max(0, issue.line - 1);
-    const lineText = document.lineAt(idxLine).text;
-    const range = new vscode.Range(new vscode.Position(idxLine, 0), new vscode.Position(idxLine, lineText.length));
-    const d = new vscode.Diagnostic(
-      range,
-      `List policy violation at ${issue.path}: ${issue.message}`,
-      vscode.DiagnosticSeverity.Warning,
-    );
-    d.source = "helm-apps";
-    d.code = issue.code;
-    diagnostics.push(d);
-  }
-
-  semanticDiagnostics.set(document.uri, diagnostics);
 }
 
 function collectIncludeFileRefs(text: string): Array<{ path: string; line: number }> {

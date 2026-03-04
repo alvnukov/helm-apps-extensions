@@ -1,0 +1,8 @@
+{
+  "helm-apps.languageServerMode": "happ",
+  "helm-apps.happPath": "/Users/zol/src/happ/target/debug/happ",
+  "helm-apps.happLspArgs": [
+    "lsp"
+  ],
+  "mirrord.promptUsingBinary": false
+}

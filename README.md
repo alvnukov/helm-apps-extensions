@@ -1,12 +1,13 @@
 # helm-apps VS Code Extension
 
 VS Code tooling for `values.yaml` in `helm-apps` format.
+Language intelligence is server-first (`happ` LSP); extension keeps lightweight local logic only.
 
 ## Features
 
 - Auto-attach bundled `helm-apps` JSON Schema to `values*.yaml`.
 - Command: `helm-apps: Configure YAML schema`.
-- Command: `helm-apps: Validate current values.yaml` (runs built-in helm-apps diagnostics).
+- Command: `helm-apps: Validate current values.yaml` (reads diagnostics from active providers; basic YAML fallback without `happ`).
 - Explorer view: `helm-apps Values Structure` for visual tree of current YAML keys.
   - Click any node to jump to its line in the file.
 - Activity Bar section: `helm-apps` with `Quick Actions`.
@@ -61,7 +62,9 @@ VS Code tooling for `values.yaml` in `helm-apps` format.
 ## Requirements
 
 - VS Code YAML extension: `redhat.vscode-yaml`.
-- `happ` binary available in `PATH` (or set `helm-apps.happPath`) for import/conversion commands.
+- `happ` binary available in `PATH` (or set `helm-apps.happPath`).
+  - Used for language features via `happ` LSP when `helm-apps.languageServerMode = happ`.
+  - Also used for import/conversion commands.
 
 ## Build and bundled library
 
@@ -76,4 +79,7 @@ VS Code tooling for `values.yaml` in `helm-apps` format.
 
 - `helm-apps.schemaFileMatch` - glob patterns for files that should use schema.
 - `helm-apps.happPath` - path to `happ` binary.
+- `helm-apps.languageServerMode` - `happ` (preferred) or `fallback`.
+- `helm-apps.happLspArgs` - args for language server process (default `["lsp"]`).
+  - If `happ` starts in partial mode, extension stays lightweight and uses only available server capabilities.
 - `helm-apps.disableYamlSchemaHover` - hides generic YAML schema hover blocks (like `Source: values.schema.json`) and keeps helm-apps contextual hover only.

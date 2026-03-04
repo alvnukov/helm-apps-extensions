@@ -72,6 +72,12 @@ test("allows service ports list when built-in list option enabled", () => {
   assert.equal(issues.length, 0);
 });
 
+test("allows built-in list nested under env key when option enabled", () => {
+  const yaml = `\nglobal:\n  _includes:\n    defaults:\n      ports:\n        prod:\n          - name: http\n            port: 80\n`;
+  const issues = validateUnexpectedNativeLists(yaml, { allowNativeListsInBuiltInListFields: true });
+  assert.equal(issues.length, 0);
+});
+
 test("ignores list markers inside YAML block scalar", () => {
   const yaml = `\napps-k8s-manifests:\n  obj:\n    spec: |-\n      containers:\n        - name: a\n          image: b\n`;
   const issues = validateUnexpectedNativeLists(yaml);

@@ -95,6 +95,54 @@
         "title": "%cmd.pasteAsHelmApps.title%"
       },
       {
+        "command": "helm-apps.insertEntityExample.appsStateless",
+        "title": "%cmd.insertEntityExample.appsStateless.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsStateful",
+        "title": "%cmd.insertEntityExample.appsStateful.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsJobs",
+        "title": "%cmd.insertEntityExample.appsJobs.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsCronjobs",
+        "title": "%cmd.insertEntityExample.appsCronjobs.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsServices",
+        "title": "%cmd.insertEntityExample.appsServices.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsIngresses",
+        "title": "%cmd.insertEntityExample.appsIngresses.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsNetworkPolicies",
+        "title": "%cmd.insertEntityExample.appsNetworkPolicies.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsConfigmaps",
+        "title": "%cmd.insertEntityExample.appsConfigmaps.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsSecrets",
+        "title": "%cmd.insertEntityExample.appsSecrets.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsPvcs",
+        "title": "%cmd.insertEntityExample.appsPvcs.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsServiceAccounts",
+        "title": "%cmd.insertEntityExample.appsServiceAccounts.title%"
+      },
+      {
+        "command": "helm-apps.insertEntityExample.appsK8sManifests",
+        "title": "%cmd.insertEntityExample.appsK8sManifests.title%"
+      },
+      {
         "command": "helm-apps.createStarterChart",
         "title": "%cmd.createStarterChart.title%"
       },
@@ -117,6 +165,12 @@
       {
         "command": "helm-apps.updateLibraryLockfile",
         "title": "%cmd.updateLibraryLockfile.title%"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "helm-apps.insertEntityExampleSubmenu",
+        "label": "%submenu.insertEntityExample.label%"
       }
     ],
     "views": {
@@ -177,18 +231,73 @@
         },
         {
           "command": "helm-apps.pasteAsHelmApps",
-          "when": "resourceLangId == yaml",
+          "when": "helmApps.happAvailable && resourceLangId == yaml",
           "group": "navigation@58"
+        },
+        {
+          "submenu": "helm-apps.insertEntityExampleSubmenu",
+          "when": "resourceLangId == yaml && helmApps.insertEntityExample.visible",
+          "group": "navigation@59"
         },
         {
           "command": "helm-apps.updateLibraryDependency",
           "when": "resourceLangId == yaml",
-          "group": "navigation@59"
+          "group": "navigation@60"
         },
         {
           "command": "helm-apps.updateLibraryLockfile",
           "when": "resourceLangId == yaml",
-          "group": "navigation@60"
+          "group": "navigation@61"
+        }
+      ],
+      "helm-apps.insertEntityExampleSubmenu": [
+        {
+          "command": "helm-apps.insertEntityExample.appsStateless",
+          "when": "helmApps.insertEntityExample.appsStateless"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsStateful",
+          "when": "helmApps.insertEntityExample.appsStateful"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsJobs",
+          "when": "helmApps.insertEntityExample.appsJobs"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsCronjobs",
+          "when": "helmApps.insertEntityExample.appsCronjobs"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsServices",
+          "when": "helmApps.insertEntityExample.appsServices"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsIngresses",
+          "when": "helmApps.insertEntityExample.appsIngresses"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsNetworkPolicies",
+          "when": "helmApps.insertEntityExample.appsNetworkPolicies"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsConfigmaps",
+          "when": "helmApps.insertEntityExample.appsConfigmaps"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsSecrets",
+          "when": "helmApps.insertEntityExample.appsSecrets"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsPvcs",
+          "when": "helmApps.insertEntityExample.appsPvcs"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsServiceAccounts",
+          "when": "helmApps.insertEntityExample.appsServiceAccounts"
+        },
+        {
+          "command": "helm-apps.insertEntityExample.appsK8sManifests",
+          "when": "helmApps.insertEntityExample.appsK8sManifests"
         }
       ],
       "explorer/context": [
@@ -249,6 +358,25 @@
           "default": "happ",
           "description": "%cfg.happPath.description%"
         },
+        "helm-apps.languageServerMode": {
+          "type": "string",
+          "enum": [
+            "happ",
+            "fallback"
+          ],
+          "default": "happ",
+          "description": "%cfg.languageServerMode.description%"
+        },
+        "helm-apps.happLspArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "%cfg.happLspArgs.description%"
+        },
         "helm-apps.disableYamlSchemaHover": {
           "type": "boolean",
           "default": true,
@@ -307,11 +435,12 @@
     "test:e2e": "tsc -p . && node ./out/test/e2e/runTest.js"
   },
   "dependencies": {
+    "vscode-languageclient": "^9.0.1",
     "yaml": "^2.8.1"
   },
   "devDependencies": {
-    "@types/node": "^20.16.5",
     "@types/mocha": "^10.0.10",
+    "@types/node": "^20.16.5",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^2.5.2",
     "mocha": "^10.8.2",

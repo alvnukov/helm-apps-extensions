@@ -6,12 +6,20 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}",
+        "--disable-extension",
+        "github.copilot",
+        "--disable-extension",
+        "github.copilot-chat"
       ],
       "outFiles": [
         "${workspaceFolder}/out/**/*.js"
       ],
-      "preLaunchTask": "npm: build"
+      "env": {
+        "HELM_APPS_DEV_HAPP_PATH": "/Users/zol/src/happ/target/debug/happ"
+      },
+      "preLaunchTask": "build extension + happ (debug)"
     }
   ]
 }
