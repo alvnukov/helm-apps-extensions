@@ -196,6 +196,24 @@ test("service-account nested binding subjects use specific RBAC doc", () => {
   assert.equal(doc?.title, "ClusterRoleBinding Subjects");
 });
 
+test("kafka-strimzi nested kafka version has specific doc", () => {
+  const doc = findFieldDoc(["apps-kafka-strimzi", "main", "kafka", "version"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Kafka Version");
+});
+
+test("kafka-strimzi topic entry has specific doc", () => {
+  const doc = findFieldDoc(["apps-kafka-strimzi", "main", "topics", "app-events"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Kafka Topic Spec");
+});
+
+test("kafka-strimzi topic retention has specific doc", () => {
+  const doc = findFieldDoc(["apps-kafka-strimzi", "main", "topics", "app-events", "retention"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Topic Retention (ms)");
+});
+
 test("deep labels key gets explicit labels hover instead of unknown", () => {
   const doc = findFieldDoc(["apps-infra", "node-users", "ops", "labels"]);
   assert.ok(doc);

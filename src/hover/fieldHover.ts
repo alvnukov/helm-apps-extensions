@@ -948,6 +948,85 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-kafka-strimzi", "*", "kafka", "version"],
+    doc: {
+      title: "Kafka Version",
+      titleRu: "Версия Kafka",
+      summary: "Kafka broker version used by Strimzi cluster.",
+      summaryRu: "Версия Kafka broker, используемая Strimzi-кластером.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Pin this value to a version supported by your installed Strimzi operator.",
+      ],
+      notesRu: [
+        "Фиксируйте значение на версии, поддерживаемой установленным Strimzi-оператором.",
+      ],
+      example: "kafka:\n  version: 3.7.0\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "kafka", "replicas"],
+    doc: {
+      title: "Kafka Broker Replicas",
+      titleRu: "Количество Kafka broker-реплик",
+      summary: "Number of Kafka broker replicas in Strimzi cluster.",
+      summaryRu: "Количество Kafka broker-реплик в Strimzi-кластере.",
+      type: "number | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "kafka:\n  replicas: 3\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "zookeeper", "replicas"],
+    doc: {
+      title: "Zookeeper Replicas",
+      titleRu: "Количество Zookeeper-реплик",
+      summary: "Number of Zookeeper replicas for Strimzi cluster.",
+      summaryRu: "Количество Zookeeper-реплик для Strimzi-кластера.",
+      type: "number | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "zookeeper:\n  replicas: 3\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "kafka", "storage", "size"],
+    doc: {
+      title: "Kafka Storage Size",
+      titleRu: "Размер Kafka storage",
+      summary: "Persistent volume size for each Kafka broker.",
+      summaryRu: "Размер persistent volume для каждого Kafka broker.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
+      example: "kafka:\n  storage:\n    size: 100Gi\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "topics", "*"],
+    doc: {
+      title: "Kafka Topic Spec",
+      titleRu: "Спека Kafka topic",
+      summary: "Config block for a managed Kafka topic.",
+      summaryRu: "Блок конфигурации управляемого Kafka topic.",
+      type: "map(topicConfig)",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "topics:\n  app-events:\n    partitions: 6\n    replicas: 3\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "topics", "*", "retention"],
+    doc: {
+      title: "Topic Retention (ms)",
+      titleRu: "Retention topic (мс)",
+      summary: "Kafka topic retention in milliseconds (`retention.ms`).",
+      summaryRu: "Retention Kafka topic в миллисекундах (`retention.ms`).",
+      type: "number | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "topics:\n  app-events:\n    retention: 604800000\n",
+    },
+  },
+  {
     pattern: ["apps-infra", "node-users"],
     doc: {
       title: "Infra Node Users",
