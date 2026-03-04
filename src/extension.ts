@@ -31,18 +31,15 @@ import {
   getAllowedAppRootKeysByGroup,
   type EntityTemplateCommandSpec,
 } from "./catalog/entityGroups";
-import { renderAppsInfraTemplateLines, renderEntityTemplateLines } from "./templates/entityTemplates";
 import {
   allowedTemplateGroupTypesForCursor,
-  buildEntityGroupInsertionPrefix,
   canInsertGroupScaffold,
-  collectExistingEntityNames,
   collectTopLevelGroupBlocks,
   findPreferredGroupNameByType,
   findTopLevelGroupBlockAtLine,
-  nextEntityName,
   resolveEffectiveGroupType,
 } from "./templates/templateInsertionContext";
+import { planEntityTemplateInsertion } from "./templates/templateInsertionPlanner";
 
 const execFileAsync = promisify(execFile);
 let previewPanel: vscode.WebviewPanel | undefined;
@@ -1135,7 +1132,8 @@ async function insertEntityTemplate(spec: EntityTemplateCommandSpec): Promise<vo
     ?? findPreferredGroupNameByType(blocks, spec.groupType)
     ?? spec.groupType;
 
-  const insertion = buildEntityTemplateInsertion(editor.document, text, targetGroupName, spec);
+  const eol = editor.document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+  const insertion = planEntityTemplateInsertion(text, eol, targetGroupName, spec);
   if (!insertion) {
     void vscode.window.showInformationMessage(
       t(
@@ -1146,7 +1144,7 @@ async function insertEntityTemplate(spec: EntityTemplateCommandSpec): Promise<vo
     return;
   }
   const applied = await editor.edit((builder) => {
-    builder.insert(insertion.position, insertion.text);
+    builder.insert(new vscode.Position(insertion.line, 0), insertion.text);
   });
   if (!applied) {
     return;
@@ -1158,73 +1156,6 @@ async function insertEntityTemplate(spec: EntityTemplateCommandSpec): Promise<vo
       `Вставлен шаблон '${insertion.insertedLabel}' (${spec.groupType})`,
     ),
   );
-}
-
-function buildEntityTemplateInsertion(
-  document: vscode.TextDocument,
-  text: string,
-  targetGroupName: string,
-  spec: EntityTemplateCommandSpec,
-): { position: vscode.Position; text: string; insertedLabel: string } | null {
-  const lines = text.split(/\r?\n/);
-  const eol = document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
-  const blocks = collectTopLevelGroupBlocks(text);
-  const targetBlock = blocks.find((b) => b.name === targetGroupName);
-
-  if (spec.insertionMode === "groupScaffold" && spec.groupType === "apps-infra") {
-    const values = parseValuesObject(text);
-    const targetGroup = toMap(values[targetGroupName]);
-    const hasNodeUsers = hasOwnKey(targetGroup, "node-users");
-    const hasNodeGroups = hasOwnKey(targetGroup, "node-groups");
-    if (targetBlock && hasNodeUsers && hasNodeGroups) {
-      return null;
-    }
-
-    const scaffoldLines = renderAppsInfraTemplateLines({
-      includeNodeUsers: !targetBlock || !hasNodeUsers,
-      includeNodeGroups: !targetBlock || !hasNodeGroups,
-    });
-    const scaffoldText = `${scaffoldLines.join(eol)}${eol}`;
-    if (targetBlock) {
-      return {
-        position: new vscode.Position(targetBlock.endLine, 0),
-        text: scaffoldText,
-        insertedLabel: `${targetGroupName}.{node-users,node-groups}`,
-      };
-    }
-
-    const prefix = buildEntityGroupInsertionPrefix(text, eol);
-    return {
-      position: new vscode.Position(lines.length, 0),
-      text: `${prefix}${targetGroupName}:${eol}${scaffoldText}`,
-      insertedLabel: `${targetGroupName}.{node-users,node-groups}`,
-    };
-  }
-
-  const existingAppNames = collectExistingEntityNames(text, targetGroupName);
-  const appName = nextEntityName(existingAppNames, spec.appBase);
-  const entityLines = renderEntityTemplateLines(spec.groupType, appName);
-  const entityText = `${entityLines.join(eol)}${eol}`;
-
-  if (targetBlock) {
-    return {
-      position: new vscode.Position(targetBlock.endLine, 0),
-      text: entityText,
-      insertedLabel: `${targetGroupName}.${appName}`,
-    };
-  }
-
-  const prefix = buildEntityGroupInsertionPrefix(text, eol);
-  const groupText = `${targetGroupName}:${eol}${entityText}`;
-  return {
-    position: new vscode.Position(lines.length, 0),
-    text: `${prefix}${groupText}`,
-    insertedLabel: `${targetGroupName}.${appName}`,
-  };
-}
-
-function hasOwnKey(root: Record<string, unknown> | null | undefined, key: string): boolean {
-  return !!root && Object.prototype.hasOwnProperty.call(root, key);
 }
 
 function readBooleanByPath(root: Record<string, unknown>, pathParts: string[]): boolean {
