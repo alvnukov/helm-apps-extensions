@@ -167,6 +167,26 @@ test("path-specific secret type doc overrides generic type", () => {
   assert.equal(doc?.title, "Secret Type");
 });
 
+test("certificate fields have certificate-specific docs", () => {
+  const issuer = findFieldDoc(["apps-certificates", "api-cert", "clusterIssuer"]);
+  assert.ok(issuer);
+  assert.equal(issuer?.title, "Certificate ClusterIssuer");
+
+  const primaryHost = findFieldDoc(["apps-certificates", "api-cert", "host"]);
+  assert.ok(primaryHost);
+  assert.equal(primaryHost?.title, "Certificate Host");
+
+  const sanHosts = findFieldDoc(["apps-certificates", "api-cert", "hosts"]);
+  assert.ok(sanHosts);
+  assert.equal(sanHosts?.title, "Certificate SAN Hosts");
+});
+
+test("pvc resources field has pvc-specific doc", () => {
+  const resources = findFieldDoc(["apps-pvcs", "data-volume", "resources"]);
+  assert.ok(resources);
+  assert.equal(resources?.title, "PVC Requested Resources");
+});
+
 test("secret/configmap immutable and stringData have explicit context docs", () => {
   const configImmutable = findFieldDoc(["apps-configmaps", "cfg", "immutable"]);
   assert.ok(configImmutable);

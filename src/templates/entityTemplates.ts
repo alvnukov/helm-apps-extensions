@@ -337,6 +337,7 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
       return withAppRoot(appName, [
         "    enabled: true",
         "    # cert-manager certificate template",
+        "    # First thing to change: clusterIssuer and DNS names",
         "    clusterIssuer: letsencrypt-prod",
         "    host: app.example.local",
         "    hosts: |-",
