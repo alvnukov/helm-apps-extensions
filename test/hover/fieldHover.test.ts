@@ -294,6 +294,30 @@ test("kafka-strimzi topic retention has specific doc", () => {
   assert.equal(doc?.title, "Topic Retention (ms)");
 });
 
+test("stateless replicas key is treated as standard workload key", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "replicas"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Replicas Count");
+});
+
+test("stateful updateStrategy key has dedicated statefulset doc", () => {
+  const doc = findFieldDoc(["apps-stateful", "db", "updateStrategy"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "StatefulSet Update Strategy");
+});
+
+test("jobs completionMode key has dedicated job doc", () => {
+  const doc = findFieldDoc(["apps-jobs", "migrate", "completionMode"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Job Completion Mode");
+});
+
+test("cronjobs suspend key has dedicated scheduling doc", () => {
+  const doc = findFieldDoc(["apps-cronjobs", "sync-cache", "suspend"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Suspend Execution");
+});
+
 test("deep labels key gets explicit labels hover instead of unknown", () => {
   const doc = findFieldDoc(["apps-infra", "node-users", "ops", "labels"]);
   assert.ok(doc);
