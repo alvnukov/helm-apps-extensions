@@ -205,6 +205,9 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
   ],
   "apps-network-policies": [
     "type",
+    "apiVersion",
+    "kind",
+    "spec",
     "podSelector",
     "policyTypes",
     "ingress",
@@ -212,6 +215,8 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
     "ingressDeny",
     "egressDeny",
     "endpointSelector",
+    "selector",
+    "types",
     "extraSpec",
   ],
   "apps-configmaps": ["data", "binaryData", "envVars", "immutable"],
