@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { APP_ENTRY_GROUP_SET, BUILTIN_GROUP_SET } from "../catalog/entityGroups";
+import {
+  APP_ENTRY_GROUP_SET,
+  BUILTIN_GROUP_SET,
+  getAllowedAppRootKeysByGroup,
+} from "../catalog/entityGroups";
 
 export interface FieldDoc {
   title: string;
@@ -233,7 +237,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     tls: { en: "TLS enablement and secret binding for ingress.", ru: "Включение TLS и привязка секрета для ingress." },
     ingressClassName: { en: "Ingress controller class for this route.", ru: "Класс ingress-контроллера для этого маршрута." },
     class: { en: "Legacy ingress class field for compatibility.", ru: "Legacy-поле ingress class для совместимости." },
+    service: { en: "Backend service name used by ingress route.", ru: "Имя backend service, используемое ingress-маршрутом." },
+    servicePort: { en: "Backend service port used by ingress route.", ru: "Порт backend service, используемый ingress-маршрутом." },
     dexAuth: { en: "Dex auth integration on ingress layer.", ru: "Интеграция Dex-аутентификации на слое ingress." },
+    sendAuthorizationHeader: { en: "Forwards authorization header from auth layer to backend app.", ru: "Пробрасывает authorization header из auth-слоя в backend-приложение." },
   },
   "apps-network-policies": {
     type: { en: "Policy rendering profile/type.", ru: "Профиль/тип рендера policy." },
@@ -1505,6 +1512,19 @@ const RULES: DocRule[] = [
       docsLink: "docs/reference-values.md#param-ingress",
       k8sDocsLink: "https://kubernetes.io/docs/concepts/services-networking/ingress/",
       example: "paths: |-\n  - path: /\n    pathType: Prefix\n",
+    },
+  },
+  {
+    pattern: ["apps-ingresses", "*", "servicePort"],
+    doc: {
+      title: "Ingress Backend Service Port",
+      titleRu: "Порт backend service для Ingress",
+      summary: "Backend service port used by ingress route.",
+      summaryRu: "Порт backend service, используемый ingress-маршрутом.",
+      type: "number | string | env-map",
+      docsLink: "docs/reference-values.md#param-ingress",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/services-networking/ingress/",
+      example: "servicePort: 8080\n",
     },
   },
   {
@@ -3196,7 +3216,11 @@ function dynamicFieldDoc(path: string[]): FieldDoc | null {
   if (path.length === 2 && path[0] !== "global" && path[1] !== "__GroupVars__") {
     const group = path[0];
     const guide = GROUP_APP_GUIDES[group];
-    const groupKeys = guide ? formatKeyList(guide.keys) : "";
+    const allowedKeys = [...getAllowedAppRootKeysByGroup(group)].sort();
+    const groupSpecificKeys = allowedKeys.filter((key) => !BASE_APP_KEYS.includes(key));
+    const groupKeys = groupSpecificKeys.length > 0
+      ? formatKeyList(groupSpecificKeys)
+      : (guide ? formatKeyList(guide.keys) : "");
     return {
       title: "App Entry",
       titleRu: "Узел приложения",
@@ -3209,12 +3233,16 @@ function dynamicFieldDoc(path: string[]): FieldDoc | null {
       type: "map",
       notes: [
         `Base app keys: ${formatKeyList(BASE_APP_KEYS)}.`,
-        ...(guide ? [`Group-specific keys for \`${group}\`: ${groupKeys}.`] : ["Add renderer-specific keys based on selected group type."]),
+        ...(groupKeys
+          ? [`Group-specific keys for \`${group}\`: ${groupKeys}.`]
+          : (guide ? [] : ["Add renderer-specific keys based on selected group type."])),
         ...(guide?.notes ?? []),
       ],
       notesRu: [
         `Базовые app-ключи: ${formatKeyList(BASE_APP_KEYS)}.`,
-        ...(guide ? [`Ключи для \`${group}\`: ${groupKeys}.`] : ["Добавьте ключи выбранного рендерера для этой группы."]),
+        ...(groupKeys
+          ? [`Ключи для \`${group}\`: ${groupKeys}.`]
+          : (guide ? [] : ["Добавьте ключи выбранного рендерера для этой группы."])),
         ...(guide?.notesRu ?? []),
       ],
       example: `${group}:\n  ${path[1]}:\n    enabled: true\n`,
@@ -3377,7 +3405,8 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
   }
 
   const rootKey = path[2];
-  const typical = new Set([...BASE_APP_KEYS, ...guide.keys]);
+  const typical = getAllowedAppRootKeysByGroup(group);
+  const typicalList = [...typical].sort();
   if (rootKey === "__AppType__") {
     return {
       ...doc,
@@ -3403,16 +3432,16 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
     summaryRu: `\`${rootKey}\` не входит в типовой контракт группы \`${group}\`.`,
     type: doc.type,
     notes: [
-      `For this group, expected app keys are: ${formatKeyList([...BASE_APP_KEYS, ...guide.keys])}.`,
+      `For this group, expected app keys are: ${formatKeyList(typicalList)}.`,
       "If this is intentional custom payload, verify behavior via render/manifest preview.",
       `Current path: \`${keyPath}\`.`,
     ],
     notesRu: [
-      `Для этой группы ожидаемые app-ключи: ${formatKeyList([...BASE_APP_KEYS, ...guide.keys])}.`,
+      `Для этой группы ожидаемые app-ключи: ${formatKeyList(typicalList)}.`,
       "Если это намеренный custom payload, проверьте эффект через рендер/preview манифестов.",
       `Текущий путь: \`${keyPath}\`.`,
     ],
-    example: `${group}:\n  app-1:\n    ${guide.keys[0] ?? "enabled"}: ...\n`,
+    example: `${group}:\n  app-1:\n    ${typicalList.find((key) => !BASE_APP_KEYS.includes(key)) ?? "enabled"}: ...\n`,
   };
 }
 

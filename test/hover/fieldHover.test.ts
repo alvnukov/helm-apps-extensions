@@ -172,6 +172,12 @@ test("path-specific network policy type doc overrides generic type", () => {
   assert.equal(doc?.title, "Network Policy Renderer Type");
 });
 
+test("ingress backend service port has explicit context doc", () => {
+  const servicePortDoc = findFieldDoc(["apps-ingresses", "api", "servicePort"]);
+  assert.ok(servicePortDoc);
+  assert.equal(servicePortDoc?.title, "Ingress Backend Service Port");
+});
+
 test("dex authenticator session field has explicit context doc", () => {
   const doc = findFieldDoc(["apps-dex-authenticators", "auth-main", "keepUsersLoggedInFor"]);
   assert.ok(doc);
