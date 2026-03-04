@@ -66,7 +66,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-certificates",
-    mustContain: ["    clusterIssuer: letsencrypt-prod", "    host: app.example.local", "    hosts: |-"],
+    mustContain: ["    name: app-example-local-tls", "    clusterIssuer: letsencrypt-prod", "    host: app.example.local", "    hosts: |-", "      - api.example.local"],
   },
   {
     group: "apps-dex-clients",
@@ -84,7 +84,7 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-custom-prometheus-rules",
-    mustContain: ["    groups:", "          highErrorRate:"],
+    mustContain: ["    groups:", "          highErrorRate:", "          highLatency:", "            isTemplate: true"],
   },
   {
     group: "apps-grafana-dashboards",

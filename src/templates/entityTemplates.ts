@@ -358,17 +358,20 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "    enabled: true",
         "    # cert-manager certificate template",
         "    # First thing to change: clusterIssuer and DNS names",
+        "    # Certificate name is also used as target TLS secret name",
+        "    name: app-example-local-tls",
         "    clusterIssuer: letsencrypt-prod",
         "    host: app.example.local",
         "    hosts: |-",
         "      - app.example.local",
+        "      - api.example.local",
       ]);
 
     case "apps-dex-clients":
       return withAppRoot(appName, [
         "    enabled: true",
         "    # OAuth client entry for Dex",
-        "    # First thing to change: callback URL(s) for your app",
+        "    # First thing to change: callback URL(s) for your app (required field)",
         "    redirectURIs: |-",
         "      - https://app.example.local/callback",
         "      - https://app.example.local/oauth2/callback",
@@ -415,12 +418,21 @@ export function renderEntityTemplateLines(groupType: string, appName: string): s
         "                severity: warning",
         "              annotations:",
         "                summary: High 5xx error rate",
+        "          highLatency:",
+        "            isTemplate: true",
+        "            content: |-",
+        "              expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > {{ .Values.global.latencySloSeconds | default 0.5 }}",
+        "              for: 10m",
+        "              labels:",
+        "                severity: warning",
+        "              annotations:",
+        "                summary: High p95 latency",
       ]);
 
     case "apps-grafana-dashboards":
       return withAppRoot(appName, [
         "    enabled: true",
-        "    # Dashboard JSON should be stored in dashboards/<name>.json",
+        "    # Dashboard JSON should be stored in dashboards/<app-name>.json",
         "    # First thing to change: target folder for dashboard placement",
         "    folder: Platform",
       ]);

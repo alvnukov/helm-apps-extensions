@@ -276,11 +276,25 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
     purpose: "Declares certificate resources (cert-manager style).",
     purposeRu: "Описывает certificate-ресурсы (в стиле cert-manager).",
     keys: ["clusterIssuer", "host", "hosts", "name"],
+    notes: [
+      "Rendered object is cert-manager `Certificate`; `name` is reused as `spec.secretName`.",
+      "Set at least one DNS entry via `host` and/or `hosts`.",
+    ],
+    notesRu: [
+      "Рендерится cert-manager объект `Certificate`; `name` также используется как `spec.secretName`.",
+      "Задайте минимум одну DNS-запись через `host` и/или `hosts`.",
+    ],
   },
   "apps-dex-clients": {
     purpose: "Declares Dex OAuth client entries.",
     purposeRu: "Описывает Dex OAuth client записи.",
     keys: ["redirectURIs", "name"],
+    notes: [
+      "`redirectURIs` is required by renderer; keep callback URLs explicit for each environment.",
+    ],
+    notesRu: [
+      "`redirectURIs` является обязательным для рендерера; задавайте callback URL явно для каждого окружения.",
+    ],
   },
   "apps-dex-authenticators": {
     purpose: "Declares dex-authenticator integration resources.",
@@ -297,16 +311,36 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
       "nodeSelector",
       "tolerations",
     ],
+    notes: [
+      "`applicationDomain` is required by renderer and defines public auth endpoint.",
+    ],
+    notesRu: [
+      "`applicationDomain` обязателен для рендерера и задает публичную auth-точку входа.",
+    ],
   },
   "apps-custom-prometheus-rules": {
     purpose: "Declares custom Prometheus rule groups/alerts.",
     purposeRu: "Описывает кастомные группы правил/алертов Prometheus.",
     keys: ["groups"],
+    notes: [
+      "Map key in `groups` becomes rendered rule-group name.",
+      "Map key in `groups.<group>.alerts` becomes rendered alert name.",
+    ],
+    notesRu: [
+      "Ключ map в `groups` становится именем рендеримой rule-group.",
+      "Ключ map в `groups.<group>.alerts` становится именем рендеримого алерта.",
+    ],
   },
   "apps-grafana-dashboards": {
     purpose: "Declares Grafana dashboard placement metadata.",
     purposeRu: "Описывает метаданные размещения Grafana dashboard.",
     keys: ["folder"],
+    notes: [
+      "Dashboard JSON is loaded from `dashboards/<app-name>.json`.",
+    ],
+    notesRu: [
+      "JSON dashboard загружается из `dashboards/<app-name>.json`.",
+    ],
   },
   "apps-kafka-strimzi": {
     purpose: "Declares Strimzi Kafka stack components.",
@@ -478,6 +512,8 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     signOutURL: { en: "URL used by authenticator sign-out flow.", ru: "URL, используемый в sign-out потоке authenticator." },
     sendAuthorizationHeader: { en: "Forwards authorization header to upstream app.", ru: "Пробрасывает authorization header в upstream приложение." },
     whitelistSourceRanges: { en: "Allowed source CIDR ranges for authenticator ingress.", ru: "Разрешенные source CIDR диапазоны для ingress authenticator." },
+    nodeSelector: { en: "Node selector for authenticator workload placement.", ru: "Node selector для размещения workload-а authenticator." },
+    tolerations: { en: "Tolerations for authenticator workload scheduling on tainted nodes.", ru: "Tolerations для планирования workload-а authenticator на tainted-ноды." },
   },
   "apps-custom-prometheus-rules": {
     groups: { en: "Prometheus rule groups and alerts map.", ru: "Карта групп правил и алертов Prometheus." },
@@ -1099,6 +1135,12 @@ const RULES: DocRule[] = [
       summaryRu: "Разрешенные OAuth redirect URI для регистрации Dex client.",
       type: "YAML block string | list | env-map",
       docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Required by renderer: empty/missing value causes render error.",
+      ],
+      notesRu: [
+        "Обязательное поле для рендерера: пустое/отсутствующее значение вызывает ошибку рендера.",
+      ],
       example: "redirectURIs: |-\n  - https://app.example.com/callback\n",
     },
   },
@@ -1111,6 +1153,12 @@ const RULES: DocRule[] = [
       summaryRu: "Публичный домен приложения, защищаемого dex-authenticator.",
       type: "string | env-map",
       docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Required by renderer: authenticator is invalid without this domain.",
+      ],
+      notesRu: [
+        "Обязательное поле для рендерера: без этого домена authenticator считается невалидным.",
+      ],
       example: "applicationDomain: auth.example.com\n",
     },
   },
@@ -1205,6 +1253,30 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-dex-authenticators", "*", "nodeSelector"],
+    doc: {
+      title: "Dex Authenticator Node Selector",
+      titleRu: "Node selector Dex Authenticator",
+      summary: "Node selector for scheduling authenticator components onto specific nodes.",
+      summaryRu: "Node selector для планирования компонентов authenticator на выбранные ноды.",
+      type: "YAML block string | map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "nodeSelector: |-\n  node-role.kubernetes.io/system: \"true\"\n",
+    },
+  },
+  {
+    pattern: ["apps-dex-authenticators", "*", "tolerations"],
+    doc: {
+      title: "Dex Authenticator Tolerations",
+      titleRu: "Tolerations Dex Authenticator",
+      summary: "Tolerations allowing authenticator components to run on tainted nodes.",
+      summaryRu: "Tolerations, позволяющие компонентам authenticator работать на tainted-нодах.",
+      type: "YAML block string | list | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "tolerations: |-\n  - key: node-role.kubernetes.io/system\n    operator: Exists\n",
+    },
+  },
+  {
     pattern: ["apps-custom-prometheus-rules", "*", "groups"],
     doc: {
       title: "Prometheus Rule Groups",
@@ -1214,6 +1286,72 @@ const RULES: DocRule[] = [
       type: "map",
       docsLink: "docs/reference-values.md#param-apps-sections",
       example: "groups:\n  app.rules:\n    alerts:\n      highErrorRate:\n        content: |-\n          expr: rate(http_requests_total[5m]) > 100\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*"],
+    doc: {
+      title: "Prometheus Rule Group Entry",
+      titleRu: "Элемент группы правил Prometheus",
+      summary: "One rule-group definition; map key is used as rendered `name` of the group.",
+      summaryRu: "Одна rule-group конфигурация; ключ map используется как рендеримое `name` группы.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "groups:\n  app.rules:\n    alerts:\n      highErrorRate:\n        content: |-\n          expr: rate(http_requests_total[5m]) > 100\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*", "alerts"],
+    doc: {
+      title: "Prometheus Alerts Map",
+      titleRu: "Карта алертов Prometheus",
+      summary: "Map of alerts inside a rule group. Each key becomes rendered alert name.",
+      summaryRu: "Карта алертов внутри rule-group. Каждый ключ становится именем рендеримого алерта.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "alerts:\n  highErrorRate:\n    isTemplate: false\n    content: |-\n      expr: rate(http_requests_total[5m]) > 100\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*", "alerts", "*"],
+    doc: {
+      title: "Prometheus Alert Entry",
+      titleRu: "Элемент алерта Prometheus",
+      summary: "Single alert rule payload; map key is rendered as alert name.",
+      summaryRu: "Конфигурация одного алерта; ключ map рендерится как имя алерта.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Define rule body in `content`; set `isTemplate` when content contains Helm templating.",
+      ],
+      notesRu: [
+        "Тело правила задавайте в `content`; включайте `isTemplate`, если контент содержит Helm-шаблонизацию.",
+      ],
+      example: "highErrorRate:\n  isTemplate: false\n  content: |-\n    expr: rate(http_requests_total[5m]) > 100\n    for: 5m\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*", "alerts", "*", "content"],
+    doc: {
+      title: "Prometheus Alert Content",
+      titleRu: "Контент алерта Prometheus",
+      summary: "Raw rule YAML fragment inserted into rendered alert object.",
+      summaryRu: "Raw YAML-фрагмент правила, вставляемый в рендеримый объект алерта.",
+      type: "string",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "content: |-\n  expr: sum(rate(http_requests_total{status=~\"5..\"}[5m])) > 5\n  for: 5m\n  labels:\n    severity: warning\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*", "alerts", "*", "isTemplate"],
+    doc: {
+      title: "Prometheus Alert Template Mode",
+      titleRu: "Шаблонный режим алерта Prometheus",
+      summary: "When true, `content` is processed with template evaluation before render.",
+      summaryRu: "Если true, `content` проходит шаблонную обработку перед рендером.",
+      type: "bool | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "isTemplate: true\n",
     },
   },
   {

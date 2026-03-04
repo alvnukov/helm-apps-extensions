@@ -287,6 +287,37 @@ test("dex authenticator source-range field has explicit context doc", () => {
   assert.equal(doc?.title, "Dex Authenticator Source CIDR Allowlist");
 });
 
+test("dex authenticator scheduling fields have explicit context docs", () => {
+  const nodeSelector = findFieldDoc(["apps-dex-authenticators", "auth-main", "nodeSelector"]);
+  assert.ok(nodeSelector);
+  assert.equal(nodeSelector?.title, "Dex Authenticator Node Selector");
+
+  const tolerations = findFieldDoc(["apps-dex-authenticators", "auth-main", "tolerations"]);
+  assert.ok(tolerations);
+  assert.equal(tolerations?.title, "Dex Authenticator Tolerations");
+});
+
+test("dex client redirect URIs doc highlights required field behavior", () => {
+  const doc = findFieldDoc(["apps-dex-clients", "portal-client", "redirectURIs"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Dex Client Redirect URIs");
+  assert.ok((doc?.notes ?? []).some((note) => note.includes("Required by renderer")));
+});
+
+test("custom prometheus rules nested nodes have dedicated docs", () => {
+  const groupEntry = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules"]);
+  assert.ok(groupEntry);
+  assert.equal(groupEntry?.title, "Prometheus Rule Group Entry");
+
+  const alertEntry = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules", "alerts", "highErrorRate"]);
+  assert.ok(alertEntry);
+  assert.equal(alertEntry?.title, "Prometheus Alert Entry");
+
+  const alertContent = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules", "alerts", "highErrorRate", "content"]);
+  assert.ok(alertContent);
+  assert.equal(alertContent?.title, "Prometheus Alert Content");
+});
+
 test("service-account namespace has explicit context doc", () => {
   const doc = findFieldDoc(["apps-service-accounts", "runtime", "namespace"]);
   assert.ok(doc);

@@ -107,6 +107,28 @@ test("pvcs allowlist includes extraSpec patch key", () => {
   assert.ok(pvcs.has("extraSpec"));
 });
 
+test("certificates, dex and monitoring group allowlists cover renderer keys", () => {
+  const certificates = getAllowedAppRootKeysByGroup("apps-certificates");
+  assert.ok(certificates.has("clusterIssuer"));
+  assert.ok(certificates.has("host"));
+  assert.ok(certificates.has("hosts"));
+
+  const dexClients = getAllowedAppRootKeysByGroup("apps-dex-clients");
+  assert.ok(dexClients.has("redirectURIs"));
+
+  const dexAuth = getAllowedAppRootKeysByGroup("apps-dex-authenticators");
+  assert.ok(dexAuth.has("applicationDomain"));
+  assert.ok(dexAuth.has("allowedGroups"));
+  assert.ok(dexAuth.has("nodeSelector"));
+  assert.ok(dexAuth.has("tolerations"));
+
+  const prometheusRules = getAllowedAppRootKeysByGroup("apps-custom-prometheus-rules");
+  assert.ok(prometheusRules.has("groups"));
+
+  const dashboards = getAllowedAppRootKeysByGroup("apps-grafana-dashboards");
+  assert.ok(dashboards.has("folder"));
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");
