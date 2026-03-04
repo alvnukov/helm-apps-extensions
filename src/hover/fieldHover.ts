@@ -89,7 +89,20 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-service-accounts": {
     purpose: "Declares ServiceAccount and related RBAC bindings.",
     purposeRu: "Описывает ServiceAccount и связанные RBAC binding-и.",
-    keys: ["name", "clusterRole", "roles", "clusterRoles", "labels", "annotations"],
+    keys: [
+      "name",
+      "namespace",
+      "automountServiceAccountToken",
+      "clusterRole",
+      "roles",
+      "clusterRoles",
+      "imagePullSecrets",
+      "secrets",
+      "apiVersion",
+      "extraFields",
+      "labels",
+      "annotations",
+    ],
   },
   "apps-ingresses": {
     purpose: "Declares Ingress routing and TLS/auth options.",
@@ -196,6 +209,8 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     headless: { en: "Headless mode (no cluster IP) for direct pod addressing.", ru: "Headless-режим (без cluster IP) для прямой адресации pod." },
   },
   "apps-service-accounts": {
+    namespace: { en: "Target namespace override for ServiceAccount and namespaced RBAC objects.", ru: "Переопределение namespace для ServiceAccount и namespaced RBAC-объектов." },
+    automountServiceAccountToken: { en: "Controls automatic API token mount for pods using this ServiceAccount.", ru: "Управляет автоматическим монтированием API-токена в pod с этим ServiceAccount." },
     clusterRole: { en: "Primary cluster role mapping for this service account.", ru: "Основная cluster role привязка для этого service account." },
     roles: { en: "Namespaced RBAC roles generated for this account.", ru: "Namespaced RBAC роли, генерируемые для этого аккаунта." },
     clusterRoles: { en: "Cluster-scoped RBAC roles for this account.", ru: "Cluster-scoped RBAC роли для этого аккаунта." },
@@ -1400,6 +1415,121 @@ const RULES: DocRule[] = [
       docsLink: "docs/reference-values.md#param-apps-sections",
       k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/",
       example: "clusterRoles:\n  viewer:\n    rules: |-\n      - apiGroups: [\"*\"]\n        resources: [\"*\"]\n        verbs: [\"get\", \"list\", \"watch\"]\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "namespace"],
+    doc: {
+      title: "ServiceAccount Namespace Override",
+      titleRu: "Переопределение namespace ServiceAccount",
+      summary: "Overrides namespace for generated ServiceAccount and namespaced Role/RoleBinding objects.",
+      summaryRu: "Переопределяет namespace для ServiceAccount и namespaced Role/RoleBinding объектов.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/",
+      example: "namespace: tools\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "automountServiceAccountToken"],
+    doc: {
+      title: "Automount ServiceAccount Token",
+      titleRu: "Автомонтирование токена ServiceAccount",
+      summary: "Controls automatic mount of service account token into pods that use this identity.",
+      summaryRu: "Управляет автоматическим монтированием service account token в pod с этой идентичностью.",
+      type: "bool | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#opt-out-of-api-credential-automounting",
+      example: "automountServiceAccountToken: false\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "clusterRole"],
+    doc: {
+      title: "Predefined ClusterRole Binding",
+      titleRu: "Привязка к готовой ClusterRole",
+      summary: "Binds current ServiceAccount to pre-existing ClusterRole by name.",
+      summaryRu: "Привязывает текущий ServiceAccount к заранее существующей ClusterRole по имени.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/",
+      example: "clusterRole:\n  name: view\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "roles", "*", "rules"],
+    doc: {
+      title: "Role Rules",
+      titleRu: "Правила Role",
+      summary: "Rules list for namespaced Role. Keep verbs/resources minimal for least-privilege access.",
+      summaryRu: "Список правил для namespaced Role. Держите verbs/resources минимальными по принципу least-privilege.",
+      type: "YAML block string with rule list",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#role-and-clusterrole",
+      notes: [
+        "Use YAML block string (`|-`) in values for compatibility with helm-apps list policy.",
+      ],
+      notesRu: [
+        "В values используйте YAML block string (`|-`) для совместимости с list-policy helm-apps.",
+      ],
+      example: "roles:\n  pod-reader:\n    rules: |-\n      - apiGroups: [\"\"]\n        resources: [\"pods\"]\n        verbs: [\"get\", \"list\", \"watch\"]\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "clusterRoles", "*", "rules"],
+    doc: {
+      title: "ClusterRole Rules",
+      titleRu: "Правила ClusterRole",
+      summary: "Rules list for cluster-scoped ClusterRole generated by this app entry.",
+      summaryRu: "Список правил для cluster-scoped ClusterRole, генерируемой этим app-узлом.",
+      type: "YAML block string with rule list",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#role-and-clusterrole",
+      notes: [
+        "Use YAML block string (`|-`) in values for compatibility with helm-apps list policy.",
+      ],
+      notesRu: [
+        "В values используйте YAML block string (`|-`) для совместимости с list-policy helm-apps.",
+      ],
+      example: "clusterRoles:\n  metrics-reader:\n    rules: |-\n      - apiGroups: [\"metrics.k8s.io\"]\n        resources: [\"pods\"]\n        verbs: [\"get\", \"list\"]\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "roles", "*", "binding", "subjects"],
+    doc: {
+      title: "RoleBinding Subjects",
+      titleRu: "Subjects для RoleBinding",
+      summary: "Explicit subject list for generated RoleBinding. If omitted, ServiceAccount subject is used by default.",
+      summaryRu: "Явный список subjects для генерируемого RoleBinding. Если не задан, по умолчанию используется ServiceAccount.",
+      type: "YAML block string with subjects list",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-subjects",
+      notes: [
+        "Use this when binding role to group/user identities instead of current ServiceAccount.",
+      ],
+      notesRu: [
+        "Используйте это, когда роль нужно выдать group/user-идентичностям вместо текущего ServiceAccount.",
+      ],
+      example: "roles:\n  pod-reader:\n    binding:\n      subjects: |-\n        - kind: Group\n          name: observability-readers\n          apiGroup: rbac.authorization.k8s.io\n",
+    },
+  },
+  {
+    pattern: ["apps-service-accounts", "*", "clusterRoles", "*", "binding", "subjects"],
+    doc: {
+      title: "ClusterRoleBinding Subjects",
+      titleRu: "Subjects для ClusterRoleBinding",
+      summary: "Explicit subject list for generated ClusterRoleBinding.",
+      summaryRu: "Явный список subjects для генерируемого ClusterRoleBinding.",
+      type: "YAML block string with subjects list",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-subjects",
+      notes: [
+        "Use this to bind cluster role to users/groups and keep ServiceAccount binding separate.",
+      ],
+      notesRu: [
+        "Используйте это, чтобы выдавать cluster role пользователям/группам отдельно от ServiceAccount.",
+      ],
+      example: "clusterRoles:\n  metrics-reader:\n    binding:\n      subjects: |-\n        - kind: User\n          name: alice@example.com\n          apiGroup: rbac.authorization.k8s.io\n",
     },
   },
 ];

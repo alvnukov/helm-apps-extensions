@@ -233,7 +233,17 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
   "apps-custom-prometheus-rules": ["groups"],
   "apps-grafana-dashboards": ["folder"],
   "apps-kafka-strimzi": ["kafka", "zookeeper", "topics", "entityOperator", "exporter", "deckhouseMetrics"],
-  "apps-service-accounts": ["clusterRole", "roles", "clusterRoles"],
+  "apps-service-accounts": [
+    "clusterRole",
+    "roles",
+    "clusterRoles",
+    "namespace",
+    "automountServiceAccountToken",
+    "imagePullSecrets",
+    "secrets",
+    "extraFields",
+    "apiVersion",
+  ],
   "apps-k8s-manifests": ["apiVersion", "kind", "spec", "fieldsYAML", "extraFields"],
 };
 

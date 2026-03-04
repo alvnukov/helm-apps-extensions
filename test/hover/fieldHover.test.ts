@@ -172,6 +172,30 @@ test("path-specific network policy type doc overrides generic type", () => {
   assert.equal(doc?.title, "Network Policy Renderer Type");
 });
 
+test("service-account namespace has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "namespace"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "ServiceAccount Namespace Override");
+});
+
+test("service-account automount token has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "automountServiceAccountToken"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Automount ServiceAccount Token");
+});
+
+test("service-account nested role rules use specific RBAC doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "roles", "pod-reader", "rules"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Role Rules");
+});
+
+test("service-account nested binding subjects use specific RBAC doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "clusterRoles", "viewer", "binding", "subjects"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "ClusterRoleBinding Subjects");
+});
+
 test("deep labels key gets explicit labels hover instead of unknown", () => {
   const doc = findFieldDoc(["apps-infra", "node-users", "ops", "labels"]);
   assert.ok(doc);
