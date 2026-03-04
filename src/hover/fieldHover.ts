@@ -239,12 +239,28 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-configmaps": {
     purpose: "Declares ConfigMap resources used by apps and envFrom.",
     purposeRu: "Описывает ConfigMap ресурсы для приложений и envFrom.",
-    keys: ["data", "binaryData", "envVars"],
+    keys: ["data", "binaryData", "envVars", "extraFields"],
+    notes: [
+      "`envVars` entries are merged into `data` during render.",
+      "Use `extraFields` for native top-level options like `immutable`.",
+    ],
+    notesRu: [
+      "Значения из `envVars` при рендере дополняют `data`.",
+      "Для нативных top-level полей (например `immutable`) используйте `extraFields`.",
+    ],
   },
   "apps-secrets": {
     purpose: "Declares Secret resources used by apps and envFrom.",
     purposeRu: "Описывает Secret ресурсы для приложений и envFrom.",
-    keys: ["type", "data", "binaryData", "envVars"],
+    keys: ["type", "data", "envVars", "extraFields"],
+    notes: [
+      "Values in `data`/`envVars` are encoded to base64 into rendered `Secret.data`.",
+      "Use `extraFields` for native `stringData`, `binaryData`, `immutable` and similar top-level fields.",
+    ],
+    notesRu: [
+      "Значения в `data`/`envVars` кодируются в base64 и попадают в `Secret.data`.",
+      "Для нативных полей `stringData`, `binaryData`, `immutable` и похожих используйте `extraFields`.",
+    ],
   },
   "apps-pvcs": {
     purpose: "Declares PersistentVolumeClaim resources.",
@@ -427,17 +443,14 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
   "apps-configmaps": {
     data: { en: "Key/value textual data stored in ConfigMap.", ru: "Текстовые key/value данные, хранимые в ConfigMap." },
     binaryData: { en: "Binary/base64 payload for ConfigMap.", ru: "Бинарный/base64 payload для ConfigMap." },
-    envVars: { en: "Helper map for env-friendly key/value generation.", ru: "Helper-map для env-friendly генерации key/value." },
-    immutable: { en: "Prevents ConfigMap data updates after creation.", ru: "Запрещает изменять данные ConfigMap после создания." },
+    envVars: { en: "Helper map merged into `data` at render time.", ru: "Helper-map, который при рендере сливается в `data`." },
+    extraFields: { en: "Raw top-level ConfigMap fields (for advanced native options).", ru: "Raw top-level поля ConfigMap (для расширенных нативных опций)." },
   },
   "apps-secrets": {
     type: { en: "Kubernetes Secret type selector.", ru: "Селектор типа Kubernetes Secret." },
-    data: { en: "Secret key/value content.", ru: "Содержимое Secret key/value." },
-    binaryData: { en: "Binary secret payload map.", ru: "Карта бинарного payload для Secret." },
-    envVars: { en: "Helper map for env-specific secret values.", ru: "Helper-map для env-специфичных secret-значений." },
-    immutable: { en: "Prevents Secret data updates after creation.", ru: "Запрещает изменять данные Secret после создания." },
-    stringData: { en: "Plain-text secret fields converted to `data` by Kubernetes.", ru: "Текстовые поля секрета, которые Kubernetes конвертирует в `data`." },
-    kind: { en: "Compatibility override for target secret-like object kind.", ru: "Совместимое переопределение kind целевого secret-подобного объекта." },
+    data: { en: "Secret key/value content encoded into rendered `Secret.data`.", ru: "Содержимое Secret key/value, кодируемое в итоговый `Secret.data`." },
+    envVars: { en: "Helper map merged into Secret `data` with env-map support.", ru: "Helper-map, который с поддержкой env-map сливается в Secret `data`." },
+    extraFields: { en: "Raw top-level Secret fields (`stringData`, `binaryData`, `immutable`, ...).", ru: "Raw top-level поля Secret (`stringData`, `binaryData`, `immutable`, ...)." },
   },
   "apps-pvcs": {
     storageClassName: { en: "Storage class used for PVC provisioning.", ru: "Storage class для provision PVC." },
@@ -875,11 +888,11 @@ const RULES: DocRule[] = [
     doc: {
       title: "ConfigMap Data",
       titleRu: "Данные ConfigMap",
-      summary: "Text key/value payload stored in ConfigMap resource.",
-      summaryRu: "Текстовый key/value payload, сохраняемый в ресурсе ConfigMap.",
+      summary: "Text key/value payload rendered into ConfigMap `data`.",
+      summaryRu: "Текстовый key/value payload, рендеримый в ConfigMap `data`.",
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-configmaps",
-      example: "data: |-\n  APP_MODE: production\n  LOG_LEVEL: info\n",
+      example: "data: |-\n  APP_MODE: production\n  app.yaml: |-\n    featureFlags:\n      useCache: true\n",
     },
   },
   {
@@ -895,28 +908,79 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-configmaps", "*", "envVars"],
+    doc: {
+      title: "ConfigMap envVars Helper",
+      titleRu: "Хелпер envVars для ConfigMap",
+      summary: "Helper map merged into ConfigMap `data`; useful for env-map overrides by environment.",
+      summaryRu: "Helper-map, который сливается в ConfigMap `data`; удобен для env-map переопределений по окружению.",
+      type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-configmaps",
+      example: "envVars:\n  LOG_LEVEL:\n    _default: info\n    prod: warn\n",
+    },
+  },
+  {
+    pattern: ["apps-configmaps", "*", "extraFields"],
+    doc: {
+      title: "ConfigMap Extra Fields",
+      titleRu: "Дополнительные поля ConfigMap",
+      summary: "Raw top-level fields merged into generated ConfigMap (for advanced native options).",
+      summaryRu: "Raw top-level поля, добавляемые в сгенерированный ConfigMap (для расширенных нативных опций).",
+      type: "YAML block string | map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/configmap/",
+      example: "extraFields:\n  immutable: true\n",
+    },
+  },
+  {
     pattern: ["apps-secrets", "*", "data"],
     doc: {
       title: "Secret Data",
       titleRu: "Данные Secret",
-      summary: "Secret key/value payload for sensitive values.",
-      summaryRu: "Secret key/value payload для чувствительных значений.",
+      summary: "Sensitive key/value payload; renderer encodes values to base64 in final `Secret.data`.",
+      summaryRu: "Чувствительный key/value payload; рендерер кодирует значения в base64 в итоговый `Secret.data`.",
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-secrets",
       k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/",
-      example: "data: |-\n  DB_PASSWORD: super-secret\n",
+      example: "data:\n  DB_PASSWORD:\n    _default: change-me-dev\n    prod: change-me-prod\n",
     },
   },
   {
     pattern: ["apps-secrets", "*", "binaryData"],
     doc: {
-      title: "Secret Binary Data",
-      titleRu: "BinaryData Secret",
-      summary: "Binary payload map for Secret data entries.",
-      summaryRu: "Карта бинарного payload для data-записей Secret.",
+      title: "Legacy Secret binaryData Key",
+      titleRu: "Legacy-ключ binaryData в Secret",
+      summary: "Direct `binaryData` is not consumed by `apps-secrets` renderer; use `extraFields.binaryData` instead.",
+      summaryRu: "Прямой `binaryData` не обрабатывается рендерером `apps-secrets`; используйте `extraFields.binaryData`.",
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-secrets",
-      example: "binaryData: |-\n  cert.p12: MII...\n",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/#working-with-secrets",
+      example: "extraFields:\n  binaryData:\n    cert.p12: MII...\n",
+    },
+  },
+  {
+    pattern: ["apps-secrets", "*", "envVars"],
+    doc: {
+      title: "Secret envVars Helper",
+      titleRu: "Хелпер envVars для Secret",
+      summary: "Helper map merged into Secret `data` (values are encoded to base64 during render).",
+      summaryRu: "Helper-map, который сливается в Secret `data` (значения кодируются в base64 во время рендера).",
+      type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-secrets",
+      example: "envVars:\n  API_TOKEN:\n    _default: token-dev\n    prod: token-prod\n",
+    },
+  },
+  {
+    pattern: ["apps-secrets", "*", "extraFields"],
+    doc: {
+      title: "Secret Extra Fields",
+      titleRu: "Дополнительные поля Secret",
+      summary: "Raw top-level Secret fields (`stringData`, `binaryData`, `immutable`, etc).",
+      summaryRu: "Raw top-level поля Secret (`stringData`, `binaryData`, `immutable` и т.д.).",
+      type: "YAML block string | map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/",
+      example: "extraFields:\n  stringData:\n    DB_PASSWORD: change-me\n  immutable: true\n",
     },
   },
   {
@@ -1795,59 +1859,59 @@ const RULES: DocRule[] = [
   {
     pattern: ["apps-configmaps", "*", "immutable"],
     doc: {
-      title: "ConfigMap Immutable Flag",
-      titleRu: "Флаг immutable для ConfigMap",
-      summary: "When true, prevents updates to ConfigMap data after creation.",
-      summaryRu: "Если true, запрещает обновление данных ConfigMap после создания.",
+      title: "Legacy ConfigMap immutable Key",
+      titleRu: "Legacy-ключ immutable в ConfigMap",
+      summary: "Direct `immutable` is not consumed by `apps-configmaps` renderer; set it via `extraFields.immutable`.",
+      summaryRu: "Прямой `immutable` не обрабатывается рендерером `apps-configmaps`; задавайте через `extraFields.immutable`.",
       type: "bool | env-map",
       docsLink: "docs/reference-values.md#param-apps-configmaps",
       k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/configmap/#immutable-configmaps",
-      example: "immutable: true\n",
+      example: "extraFields:\n  immutable: true\n",
     },
   },
   {
     pattern: ["apps-secrets", "*", "immutable"],
     doc: {
-      title: "Secret Immutable Flag",
-      titleRu: "Флаг immutable для Secret",
-      summary: "When true, prevents updates to Secret data after creation.",
-      summaryRu: "Если true, запрещает обновление данных Secret после создания.",
+      title: "Legacy Secret immutable Key",
+      titleRu: "Legacy-ключ immutable в Secret",
+      summary: "Direct `immutable` is not consumed by `apps-secrets` renderer; set it via `extraFields.immutable`.",
+      summaryRu: "Прямой `immutable` не обрабатывается рендерером `apps-secrets`; задавайте через `extraFields.immutable`.",
       type: "bool | env-map",
       docsLink: "docs/reference-values.md#param-apps-secrets",
       k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/#secret-immutable",
-      example: "immutable: true\n",
+      example: "extraFields:\n  immutable: true\n",
     },
   },
   {
     pattern: ["apps-secrets", "*", "stringData"],
     doc: {
-      title: "Secret StringData",
-      titleRu: "StringData для Secret",
-      summary: "Plain-text key/value map which Kubernetes encodes into `data` on create/update.",
-      summaryRu: "Карта текстовых key/value, которую Kubernetes кодирует в `data` при создании/обновлении.",
+      title: "Legacy Secret stringData Key",
+      titleRu: "Legacy-ключ stringData в Secret",
+      summary: "Direct `stringData` is not consumed by `apps-secrets` renderer; place it under `extraFields.stringData`.",
+      summaryRu: "Прямой `stringData` не обрабатывается рендерером `apps-secrets`; размещайте его в `extraFields.stringData`.",
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-secrets",
       k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/#working-with-secrets",
       notes: [
-        "Use `stringData` for human-readable values in GitOps; Kubernetes converts them to base64 in `data`.",
+        "Use `extraFields.stringData` for human-readable GitOps values when you need native Kubernetes `stringData`.",
       ],
       notesRu: [
-        "Используйте `stringData` для человеко-читаемых значений в GitOps; Kubernetes конвертирует их в base64 в `data`.",
+        "Используйте `extraFields.stringData` для человеко-читаемых GitOps-значений, когда нужен нативный Kubernetes `stringData`.",
       ],
-      example: "stringData:\n  DB_PASSWORD: change-me\n",
+      example: "extraFields:\n  stringData:\n    DB_PASSWORD: change-me\n",
     },
   },
   {
     pattern: ["apps-secrets", "*", "kind"],
     doc: {
-      title: "Secret Kind Override",
-      titleRu: "Переопределение kind для Secret",
-      summary: "Compatibility override for generated secret-like object kind.",
-      summaryRu: "Совместимое переопределение kind для генерируемого secret-подобного объекта.",
+      title: "Legacy Secret kind Key",
+      titleRu: "Legacy-ключ kind в Secret",
+      summary: "Direct `kind` override is not consumed by `apps-secrets`; use `apps-k8s-manifests` for custom kinds.",
+      summaryRu: "Прямое переопределение `kind` не обрабатывается в `apps-secrets`; для кастомных kind используйте `apps-k8s-manifests`.",
       type: "string | env-map",
       docsLink: "docs/reference-values.md#param-apps-secrets",
       k8sDocsLink: "https://kubernetes.io/docs/reference/using-api/",
-      example: "kind: Secret\n",
+      example: "apps-k8s-manifests:\n  custom-secret:\n    kind: ExternalSecret\n",
     },
   },
   {
@@ -4049,6 +4113,22 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
   }
 
   const keyPath = path.join(".");
+  const rendererHints: string[] = [];
+  const rendererHintsRu: string[] = [];
+  const summaryHint = doc.summary.trim();
+  const summaryHintRu = (doc.summaryRu ?? doc.summary).trim();
+  if (summaryHint.length > 0) {
+    rendererHints.push(`Renderer hint: ${summaryHint}`);
+  }
+  if (summaryHintRu.length > 0) {
+    rendererHintsRu.push(`Подсказка рендерера: ${summaryHintRu}`);
+  }
+  if (doc.notes && doc.notes.length > 0) {
+    rendererHints.push(...doc.notes.slice(0, 3));
+  }
+  if (doc.notesRu && doc.notesRu.length > 0) {
+    rendererHintsRu.push(...doc.notesRu.slice(0, 3));
+  }
   return {
     title: "Field Is Unusual For This Group",
     titleRu: "Ключ нетипичен для этой группы",
@@ -4057,11 +4137,13 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
     type: doc.type,
     notes: [
       `For this group, expected app keys are: ${formatKeyList(typicalList)}.`,
+      ...rendererHints,
       "If this is intentional custom payload, verify behavior via render/manifest preview.",
       `Current path: \`${keyPath}\`.`,
     ],
     notesRu: [
       `Для этой группы ожидаемые app-ключи: ${formatKeyList(typicalList)}.`,
+      ...rendererHintsRu,
       "Если это намеренный custom payload, проверьте эффект через рендер/preview манифестов.",
       `Текущий путь: \`${keyPath}\`.`,
     ],

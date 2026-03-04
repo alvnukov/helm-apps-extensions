@@ -50,11 +50,11 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-configmaps",
-    mustContain: ["    _include: [\"apps-configmaps-defaultConfigmap\"]", "    data:", "    binaryData:", "    envVars:"],
+    mustContain: ["    _include: [\"apps-configmaps-defaultConfigmap\"]", "    data: |-", "    binaryData:", "    envVars:", "    extraFields:"],
   },
   {
     group: "apps-secrets",
-    mustContain: ["    _include: [\"apps-secrets-defaultSecret\"]", "    type: Opaque", "    stringData:", "    data:", "    binaryData:", "    immutable: false"],
+    mustContain: ["    _include: [\"apps-secrets-defaultSecret\"]", "    type: Opaque", "    data:", "    envVars:", "    extraFields:", "      immutable: false"],
   },
   {
     group: "apps-pvcs",

@@ -202,24 +202,35 @@ test("pvc resources field has pvc-specific doc", () => {
   assert.equal(resources?.title, "PVC Requested Resources");
 });
 
-test("secret/configmap immutable and stringData have explicit context docs", () => {
-  const configImmutable = findFieldDoc(["apps-configmaps", "cfg", "immutable"]);
-  assert.ok(configImmutable);
-  assert.equal(configImmutable?.title, "ConfigMap Immutable Flag");
+test("configmaps and secrets expose group-specific helper docs", () => {
+  const configEnvVars = findFieldDoc(["apps-configmaps", "cfg", "envVars"]);
+  assert.ok(configEnvVars);
+  assert.equal(configEnvVars?.title, "ConfigMap envVars Helper");
 
-  const secretImmutable = findFieldDoc(["apps-secrets", "secret-main", "immutable"]);
-  assert.ok(secretImmutable);
-  assert.equal(secretImmutable?.title, "Secret Immutable Flag");
+  const secretExtra = findFieldDoc(["apps-secrets", "secret-main", "extraFields"]);
+  assert.ok(secretExtra);
+  assert.equal(secretExtra?.title, "Secret Extra Fields");
 
-  const stringData = findFieldDoc(["apps-secrets", "secret-main", "stringData"]);
-  assert.ok(stringData);
-  assert.equal(stringData?.title, "Secret StringData");
+  const secretData = findFieldDoc(["apps-secrets", "secret-main", "data"]);
+  assert.ok(secretData);
+  assert.match(secretData?.summary ?? "", /base64/i);
 });
 
-test("secret kind override has explicit context doc", () => {
-  const doc = findFieldDoc(["apps-secrets", "secret-main", "kind"]);
-  assert.ok(doc);
-  assert.equal(doc?.title, "Secret Kind Override");
+test("legacy secret/configmap native keys are marked unusual with migration hints", () => {
+  const configImmutable = findFieldDoc(["apps-configmaps", "cfg", "immutable"]);
+  assert.ok(configImmutable);
+  assert.equal(configImmutable?.title, "Field Is Unusual For This Group");
+  assert.ok((configImmutable?.notes ?? []).some((note) => note.includes("extraFields.immutable")));
+
+  const secretStringData = findFieldDoc(["apps-secrets", "secret-main", "stringData"]);
+  assert.ok(secretStringData);
+  assert.equal(secretStringData?.title, "Field Is Unusual For This Group");
+  assert.ok((secretStringData?.notes ?? []).some((note) => note.includes("extraFields.stringData")));
+
+  const secretKind = findFieldDoc(["apps-secrets", "secret-main", "kind"]);
+  assert.ok(secretKind);
+  assert.equal(secretKind?.title, "Field Is Unusual For This Group");
+  assert.ok((secretKind?.notes ?? []).some((note) => note.includes("apps-k8s-manifests")));
 });
 
 test("path-specific network policy type doc overrides generic type", () => {

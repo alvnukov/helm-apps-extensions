@@ -80,6 +80,25 @@ test("dex authenticator root-key allowlist covers session and source-range setti
   assert.ok(dexAuth.has("whitelistSourceRanges"));
 });
 
+test("configmaps and secrets allowlists match current renderer contract", () => {
+  const configmaps = getAllowedAppRootKeysByGroup("apps-configmaps");
+  assert.ok(configmaps.has("data"));
+  assert.ok(configmaps.has("binaryData"));
+  assert.ok(configmaps.has("envVars"));
+  assert.ok(configmaps.has("extraFields"));
+  assert.equal(configmaps.has("immutable"), false);
+
+  const secrets = getAllowedAppRootKeysByGroup("apps-secrets");
+  assert.ok(secrets.has("type"));
+  assert.ok(secrets.has("data"));
+  assert.ok(secrets.has("envVars"));
+  assert.ok(secrets.has("extraFields"));
+  assert.equal(secrets.has("stringData"), false);
+  assert.equal(secrets.has("binaryData"), false);
+  assert.equal(secrets.has("immutable"), false);
+  assert.equal(secrets.has("kind"), false);
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");
