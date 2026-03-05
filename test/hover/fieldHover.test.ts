@@ -60,6 +60,16 @@ test("returns unknown-field doc for custom key under app", () => {
   assert.equal(doc?.title, "Custom or Unknown Field");
 });
 
+test("env-map branches have dedicated docs instead of unknown fallback", () => {
+  const defaultBranch = findFieldDoc(["apps-stateless", "api", "replicas", "_default"]);
+  assert.ok(defaultBranch);
+  assert.equal(defaultBranch?.title, "Environment Default Branch");
+
+  const envBranch = findFieldDoc(["apps-stateless", "api", "replicas", "prod"]);
+  assert.ok(envBranch);
+  assert.equal(envBranch?.title, "Environment-specific Override Branch");
+});
+
 test("returns resources doc for kafka-strimzi app resources key", () => {
   const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "resources"]);
   assert.ok(doc);

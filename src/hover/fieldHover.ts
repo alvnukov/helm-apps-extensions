@@ -5109,6 +5109,35 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
   const parentPath = path.slice(0, -1);
   const parentSchema = root ? resolveSchemaAtPath(root, parentPath) : null;
   const hints = parentSchema ? collectKnownChildHints(parentSchema) : [];
+  const parentDoc = findFieldDoc(parentPath);
+  const parentType = parentDoc?.type.toLowerCase() ?? "";
+  const parentLooksLikeEnvMap = hints.includes("_default") || parentType.includes("env-map");
+
+  if (key === "_default" || parentLooksLikeEnvMap) {
+    const isDefault = key === "_default";
+    return {
+      title: isDefault ? "Environment Default Branch" : "Environment-specific Override Branch",
+      titleRu: isDefault ? "Ветка env-map по умолчанию" : "Ветка env-map для окружения",
+      summary: isDefault
+        ? "Default env-map value used when no exact or regex environment branch matches."
+        : `Value branch for environment key \`${key}\` in env-map.`,
+      summaryRu: isDefault
+        ? "Значение env-map по умолчанию, применяемое когда нет точного или regex-совпадения окружения."
+        : `Ветка значения для ключа окружения \`${key}\` в env-map.`,
+      type: "env-map branch",
+      notes: [
+        "Resolution order: exact env key -> first matching regex key -> `_default`.",
+        "Use this for environment-specific tuning while keeping one logical field.",
+      ],
+      notesRu: [
+        "Порядок резолва: точный ключ окружения -> первый совпавший regex-ключ -> `_default`.",
+        "Используйте для env-специфичной настройки, сохраняя одно логическое поле.",
+      ],
+      example: isDefault
+        ? "replicas:\n  _default: 2\n  prod: 4\n"
+        : "replicas:\n  _default: 2\n  prod: 4\n  /stage.*/: 3\n",
+    };
+  }
 
   const notes = [
     "This key is not yet documented by extension hover catalog.",
