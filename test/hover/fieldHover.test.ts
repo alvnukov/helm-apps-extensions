@@ -347,16 +347,47 @@ test("service-account automount token has explicit context doc", () => {
   assert.equal(doc?.title, "Automount ServiceAccount Token");
 });
 
+test("service-account imagePullSecrets has explicit context doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "imagePullSecrets"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "ServiceAccount ImagePullSecrets");
+});
+
+test("service-account role map entry has dedicated hover", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "roles", "pod-reader"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Role Entry");
+});
+
 test("service-account nested role rules use specific RBAC doc", () => {
   const doc = findFieldDoc(["apps-service-accounts", "runtime", "roles", "pod-reader", "rules"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Role Rules");
 });
 
+test("service-account nested rule verbs has dedicated RBAC leaf doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "roles", "pod-reader", "rules", "allow-read", "verbs"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "RBAC Rule Verbs");
+});
+
+test("service-account nested binding name has dedicated doc", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "clusterRoles", "viewer", "binding", "name"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Binding Name Override");
+});
+
 test("service-account nested binding subjects use specific RBAC doc", () => {
   const doc = findFieldDoc(["apps-service-accounts", "runtime", "clusterRoles", "viewer", "binding", "subjects"]);
   assert.ok(doc);
   assert.equal(doc?.title, "ClusterRoleBinding Subjects");
+});
+
+test("service-account legacy clusterRole root key is marked as unusual", () => {
+  const doc = findFieldDoc(["apps-service-accounts", "runtime", "clusterRole"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
+  assert.ok((doc?.notes ?? []).some((note) => note.includes("does not consume root `clusterRole`")));
 });
 
 test("kafka-strimzi version has specific doc", () => {

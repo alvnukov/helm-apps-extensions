@@ -144,6 +144,16 @@ test("k8s-manifests allowlist includes dedicated top-level manifest fields", () 
   assert.equal(manifests.has("fieldsYAML"), false);
 });
 
+test("service-accounts allowlist reflects renderer contract without legacy clusterRole root key", () => {
+  const serviceAccounts = getAllowedAppRootKeysByGroup("apps-service-accounts");
+  assert.ok(serviceAccounts.has("roles"));
+  assert.ok(serviceAccounts.has("clusterRoles"));
+  assert.ok(serviceAccounts.has("namespace"));
+  assert.ok(serviceAccounts.has("imagePullSecrets"));
+  assert.ok(serviceAccounts.has("secrets"));
+  assert.equal(serviceAccounts.has("clusterRole"), false);
+});
+
 test("catalog and package command contributions stay in sync", () => {
   const manifest = readJsonFile<PackageManifest>("package.json");
   const nls = readJsonFile<Record<string, string>>("package.nls.json");

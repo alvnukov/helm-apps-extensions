@@ -104,7 +104,17 @@ const GROUP_EXPECTATIONS: GroupExpectation[] = [
   },
   {
     group: "apps-service-accounts",
-    mustContain: ["    roles:", "    clusterRoles:", "    name: app-runtime", "    namespace: apps", "    automountServiceAccountToken: false"],
+    mustContain: [
+      "    roles:",
+      "    clusterRoles:",
+      "    name: app-runtime",
+      "    namespace: apps",
+      "    automountServiceAccountToken: false",
+      "    imagePullSecrets: |-",
+      "    secrets: |-",
+      "        name: app-pod-reader",
+      "          name: app-metrics-reader-binding",
+    ],
   },
   {
     group: "apps-k8s-manifests",

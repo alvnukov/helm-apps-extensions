@@ -334,7 +334,6 @@ const GROUP_APP_ROOT_KEYS: Partial<Record<BuiltinGroupType, readonly string[]>> 
     "deckhouseMetrics",
   ],
   "apps-service-accounts": [
-    "clusterRole",
     "roles",
     "clusterRoles",
     "namespace",
