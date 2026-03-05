@@ -634,6 +634,12 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
 
   const startErrors: string[] = [];
   for (const candidatePath of pathCandidates) {
+    // Log exact binary version for deterministic troubleshooting.
+    // This helps distinguish PATH/fallback mismatches when multiple happ builds are present.
+    // eslint-disable-next-line no-await-in-loop
+    const candidateVersion = await readHappVersion(candidatePath);
+    happLspBootstrapOutput.appendLine(`candidate version: ${candidatePath} :: ${candidateVersion ?? "unknown"}`);
+
     // Validate candidate before LSP bootstrap to avoid starting incompatible binaries.
     // Typical failure case: PATH points to older happ without `lsp` subcommand.
     // eslint-disable-next-line no-await-in-loop
@@ -775,6 +781,22 @@ type HappLspPreflight = {
   ok: boolean;
   reason: string;
 };
+
+async function readHappVersion(candidatePath: string): Promise<string | null> {
+  try {
+    const { stdout, stderr } = await execFileAsync(candidatePath, ["--version"], {
+      timeout: 5000,
+      maxBuffer: 256 * 1024,
+    });
+    const line = `${stdout ?? ""}\n${stderr ?? ""}`
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .find((s) => s.length > 0);
+    return line ?? null;
+  } catch {
+    return null;
+  }
+}
 
 async function preflightHappLspCandidate(candidatePath: string): Promise<HappLspPreflight> {
   const execOpts = {
