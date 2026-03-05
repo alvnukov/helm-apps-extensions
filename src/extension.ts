@@ -3876,7 +3876,7 @@ function renderPreviewHtml(
   const menuJson = serializeJsonForInlineScript(menu);
   const ui = theme.ui;
   const syntax = theme.syntax;
-  const literalEnvs = [...new Set([options.env, ...envDiscovery.literals].filter((v) => v.trim().length > 0))];
+  const literalEnvs = [...new Set(envDiscovery.literals.map((v) => v.trim()).filter((v) => v.length > 0))];
   const regexEnvOptions = envDiscovery.regexes
     .map((re) => {
       const sample = sampleEnvFromRegex(re);
@@ -3887,12 +3887,17 @@ function renderPreviewHtml(
     ...literalEnvs,
     ...regexEnvOptions.map((r) => r.sample),
   ])];
-  const quickEnvButtons = knownEnvs.length > 0
-    ? `<div class="quick-envs">${
-      knownEnvs
-        .map((env) => `<button type="button" class="quick-env" data-env="${escapeHtml(env)}">${escapeHtml(env)}</button>`)
-        .join("")
-    }</div>`
+  const knownEnvSelect = knownEnvs.length > 0
+    ? `<label>known env:
+        <select id="envSelect">
+          <option value="">custom...</option>
+          ${
+            knownEnvs
+              .map((env) => `<option value="${escapeHtml(env)}"${env === options.env ? " selected" : ""}>${escapeHtml(env)}</option>`)
+              .join("")
+          }
+        </select>
+      </label>`
     : "";
   const details = (envDiscovery.regexes.length > 0 || missingFiles.length > 0)
     ? `<details>
@@ -3981,6 +3986,21 @@ function renderPreviewHtml(
         border-color: ${ui.controlFocusBorder};
         box-shadow: 0 0 0 2px ${ui.controlFocusRing};
       }
+      select {
+        min-width: 150px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: var(--surface);
+        color: var(--text);
+        transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+      }
+      select:hover { border-color: ${ui.controlHoverBorder}; }
+      select:focus {
+        outline: none;
+        border-color: ${ui.controlFocusBorder};
+        box-shadow: 0 0 0 2px ${ui.controlFocusRing};
+      }
       input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
       .entity-control { position: relative; display: inline-flex; align-items: center; gap: 8px; }
       .entity-trigger {
@@ -4057,18 +4077,6 @@ function renderPreviewHtml(
       }
       .entity-item-arrow { color: var(--muted); padding-left: 10px; font-size: 12px; }
       .entity-empty { font-size: 12px; color: var(--muted); padding: 6px 8px; }
-      .quick-envs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-      .quick-env {
-        border: 1px solid ${ui.quickEnvBorder};
-        background: ${ui.quickEnvBg};
-        color: ${ui.quickEnvText};
-        border-radius: 999px;
-        font-size: 11px;
-        padding: 3px 10px;
-        cursor: pointer;
-        transition: background-color .16s ease, border-color .16s ease;
-      }
-      .quick-env:hover { border-color: ${ui.quickEnvHoverBorder}; background: ${ui.quickEnvHoverBg}; }
       .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
       .warn { font-size: 11px; color: var(--danger); margin-top: 8px; }
       .mode-tabs {
@@ -4187,8 +4195,8 @@ function renderPreviewHtml(
       <label>env:
         <input id="envInput" type="text" value="${escapeHtml(options.env)}" />
       </label>
+      ${knownEnvSelect}
     </div>
-    ${quickEnvButtons}
     <div class="render-shell">
       <div class="mode-tabs" role="tablist" aria-label="render mode">
         <button id="renderModeValues" type="button" class="mode-tab ${renderModeValuesActive}" data-mode="values" role="tab" aria-selected="${renderModeValuesSelected}">values</button>
@@ -4202,7 +4210,7 @@ function renderPreviewHtml(
       const options = ${optionsJson};
       const menu = ${menuJson};
       const envInput = document.getElementById("envInput");
-      const quickEnvButtons = document.querySelectorAll(".quick-env");
+      const envSelect = document.getElementById("envSelect");
       const renderModeTabs = document.querySelectorAll(".mode-tab");
       const entityTrigger = document.getElementById("entityTrigger");
       const entityPopup = document.getElementById("entityPopup");
@@ -4224,21 +4232,29 @@ function renderPreviewHtml(
         };
       })();
 
-      envInput.addEventListener("input", emitDebounced);
-      envInput.addEventListener("change", emit);
+      envInput.addEventListener("input", () => {
+        syncEnvSelectWithInput();
+        emitDebounced();
+      });
+      envInput.addEventListener("change", () => {
+        syncEnvSelectWithInput();
+        emit();
+      });
       envInput.addEventListener("keyup", (e) => {
         if (e.key === "Enter") {
+          syncEnvSelectWithInput();
           emit();
         }
       });
-      quickEnvButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const next = btn.getAttribute("data-env");
-          if (!next) return;
-          envInput.value = next;
-          envInput.dispatchEvent(new Event("change"));
+      if (envSelect instanceof HTMLSelectElement) {
+        envSelect.addEventListener("change", () => {
+          if (!envSelect.value) {
+            return;
+          }
+          envInput.value = envSelect.value;
+          emit();
         });
-      });
+      }
       renderModeTabs.forEach((tab) => {
         tab.addEventListener("click", () => {
           const mode = tab.getAttribute("data-mode");
@@ -4254,6 +4270,7 @@ function renderPreviewHtml(
         });
       });
       updateRenderModeTabs();
+      syncEnvSelectWithInput();
       normalizeSelection();
       if (entityTrigger && entityPopup && groupMenu && appMenu) {
         updateEntityLabel();
@@ -4431,6 +4448,15 @@ function renderPreviewHtml(
           showDiff: false,
           renderMode
         });
+      }
+
+      function syncEnvSelectWithInput() {
+        if (!(envSelect instanceof HTMLSelectElement)) {
+          return;
+        }
+        const current = (envInput.value || "").trim();
+        const known = Array.from(envSelect.options).some((opt) => opt.value === current);
+        envSelect.value = known ? current : "";
       }
 
       function updateRenderModeTabs() {
