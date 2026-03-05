@@ -457,6 +457,11 @@ test("catalog app-root keys are never marked as unusual fields", () => {
         "Ключ нетипичен для этой группы",
         `${group}.${key}: should not be marked unusual (ru)`,
       );
+      assert.notEqual(
+        doc?.title,
+        "Custom or Unknown Field",
+        `${group}.${key}: should not fall back to unknown hover`,
+      );
     }
   }
 });
