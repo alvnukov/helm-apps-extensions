@@ -60,6 +60,12 @@ test("returns unusual-field doc for unsupported root key under built-in app", ()
   assert.equal(doc?.title, "Field Is Unusual For This Group");
 });
 
+test("unsupported nested keys under unsupported root stay in unusual-field mode", () => {
+  const doc = findFieldDoc(["apps-stateless", "nginx", "_options", "metricsEnabled"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
+});
+
 test("returns unknown-field doc for nested custom key inside supported root block", () => {
   const doc = findFieldDoc(["apps-stateless", "nginx", "containers", "main", "myCustomFlag"]);
   assert.ok(doc);
@@ -181,6 +187,16 @@ test("container image leaf fields have explicit docs", () => {
   assert.equal(imageTag?.title, "Container Image Tag");
 });
 
+test("container image pull and termination policies have explicit docs", () => {
+  const pullPolicy = findFieldDoc(["apps-stateless", "api", "containers", "main", "imagePullPolicy"]);
+  assert.ok(pullPolicy);
+  assert.equal(pullPolicy?.title, "Image Pull Policy");
+
+  const termPolicy = findFieldDoc(["apps-stateless", "api", "containers", "main", "terminationMessagePolicy"]);
+  assert.ok(termPolicy);
+  assert.equal(termPolicy?.title, "Termination Message Policy");
+});
+
 test("container envVars entry has dedicated doc", () => {
   const doc = findFieldDoc(["apps-stateless", "api", "containers", "main", "envVars", "LOG_LEVEL"]);
   assert.ok(doc);
@@ -207,6 +223,36 @@ test("container config file content paths have dedicated docs", () => {
   assert.equal(yamlContent?.title, "YAML Config File Content");
 });
 
+test("config file subPath and YAML include_files paths have dedicated docs", () => {
+  const subPath = findFieldDoc(["apps-cronjobs", "etcd-backup", "containers", "main", "configFiles", "backup-script", "subPath"]);
+  assert.ok(subPath);
+  assert.equal(subPath?.title, "Config File SubPath");
+
+  const includeFiles = findFieldDoc(["apps-stateless", "worker", "containers", "main", "configFilesYAML", "op_config.yaml", "content", "_include_files"]);
+  assert.ok(includeFiles);
+  assert.equal(includeFiles?.title, "YAML Content Include Files");
+});
+
+test("nodeSelector dynamic entries have dedicated docs", () => {
+  const rootEntry = findFieldDoc(["apps-jobs", "load-dump", "nodeSelector", "devops-p"]);
+  assert.ok(rootEntry);
+  assert.equal(rootEntry?.title, "Node Selector Entry");
+
+  const nestedEntry = findFieldDoc(["apps-stateful", "minio", "nodeSelector", "stage1", "kubernetes.io/hostname"]);
+  assert.ok(nestedEntry);
+  assert.equal(nestedEntry?.title, "Nested Node Selector Entry");
+});
+
+test("kafka-strimzi nested zookeeper/entityOperator fields have dedicated docs", () => {
+  const topicOperator = findFieldDoc(["apps-kafka-strimzi", "kafka", "entityOperator", "topicOperator"]);
+  assert.ok(topicOperator);
+  assert.equal(topicOperator?.title, "Topic Operator Settings");
+
+  const zkStorageSize = findFieldDoc(["apps-kafka-strimzi", "kafka", "zookeeper", "storage", "size"]);
+  assert.ok(zkStorageSize);
+  assert.equal(zkStorageSize?.title, "Zookeeper Storage Size");
+});
+
 test("custom group resolves docs by env-map __GroupVars__.type", () => {
   const yaml = `global:
   env: prod
@@ -226,6 +272,12 @@ test("nested workload service keys reuse standalone service docs", () => {
   const doc = findFieldDoc(["apps-stateless", "api", "service", "clusterIP"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Service ClusterIP");
+});
+
+test("unsupported nested workload service key is marked unusual", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "service", "metadata"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
 });
 
 test("custom workload group resolves nested service docs through effective type", () => {

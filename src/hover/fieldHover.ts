@@ -1559,6 +1559,90 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-kafka-strimzi", "*", "storage", "size"],
+    doc: {
+      title: "Kafka Storage Size",
+      titleRu: "Размер хранилища Kafka",
+      summary: "Requested persistent volume size for Kafka brokers.",
+      summaryRu: "Запрашиваемый размер persistent volume для Kafka brokers.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "storage:\n  size: 100Gi\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "entityOperator", "topicOperator"],
+    doc: {
+      title: "Topic Operator Settings",
+      titleRu: "Настройки Topic Operator",
+      summary: "Configuration for Strimzi topic-operator component.",
+      summaryRu: "Конфигурация компонента topic-operator в Strimzi.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "entityOperator:\n  topicOperator:\n    resources:\n      requests:\n        mcpu: 100\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "entityOperator", "userOperator"],
+    doc: {
+      title: "User Operator Settings",
+      titleRu: "Настройки User Operator",
+      summary: "Configuration for Strimzi user-operator component.",
+      summaryRu: "Конфигурация компонента user-operator в Strimzi.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "entityOperator:\n  userOperator:\n    resources:\n      requests:\n        mcpu: 100\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "zookeeper", "storage"],
+    doc: {
+      title: "Zookeeper Storage",
+      titleRu: "Хранилище Zookeeper",
+      summary: "Storage settings for Strimzi zookeeper nodes.",
+      summaryRu: "Настройки хранилища для zookeeper-нод Strimzi.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "zookeeper:\n  storage:\n    size: 20Gi\n    class: gp3\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "zookeeper", "storage", "size"],
+    doc: {
+      title: "Zookeeper Storage Size",
+      titleRu: "Размер хранилища Zookeeper",
+      summary: "Requested persistent volume size for zookeeper nodes.",
+      summaryRu: "Запрашиваемый размер persistent volume для zookeeper-нод.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "zookeeper:\n  storage:\n    size: 20Gi\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "zookeeper", "jvmOptions"],
+    doc: {
+      title: "Zookeeper JVM Options",
+      titleRu: "JVM-параметры Zookeeper",
+      summary: "JVM options passed to zookeeper process.",
+      summaryRu: "JVM-параметры, передаваемые процессу zookeeper.",
+      type: "YAML block string | string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "zookeeper:\n  jvmOptions: |-\n    -Xms512m -Xmx512m\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "zookeeper", "metricsConfig"],
+    doc: {
+      title: "Zookeeper Metrics Config",
+      titleRu: "Конфиг метрик Zookeeper",
+      summary: "Prometheus/JMX exporter metrics config for zookeeper.",
+      summaryRu: "Конфигурация метрик Prometheus/JMX exporter для zookeeper.",
+      type: "YAML block string | map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "zookeeper:\n  metricsConfig: |-\n    type: jmxPrometheusExporter\n",
+    },
+  },
+  {
     pattern: ["apps-kafka-strimzi", "*", "topics", "*"],
     doc: {
       title: "Kafka Topic Spec",
@@ -2008,6 +2092,54 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["*", "*", "nodeSelector", "*"],
+    doc: {
+      title: "Node Selector Entry",
+      titleRu: "Элемент nodeSelector",
+      summary: "Single node selector label key/value entry.",
+      summaryRu: "Отдельный key/value элемент label-selector для выбора нод.",
+      type: "string | env-map | map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/",
+      example: "nodeSelector:\n  node-role.kubernetes.io/system: \"true\"\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "nodeSelector", "*"],
+    doc: {
+      title: "Node Selector Entry",
+      titleRu: "Элемент nodeSelector",
+      summary: "Single node selector label key/value entry.",
+      summaryRu: "Отдельный key/value элемент label-selector для выбора нод.",
+      type: "string | env-map | map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/",
+      example: "nodeSelector:\n  kubernetes.io/arch: amd64\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "nodeSelector", "*", "*"],
+    doc: {
+      title: "Nested Node Selector Entry",
+      titleRu: "Вложенный элемент nodeSelector",
+      summary: "Nested selector entry often used when nodeSelector is env-mapped by environment key.",
+      summaryRu: "Вложенный selector-элемент, часто используемый когда nodeSelector env-map-ится по окружению.",
+      type: "string | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/",
+      example: "nodeSelector:\n  prod:\n    kubernetes.io/hostname: worker-prod-1\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "nodeSelector", "*", "*"],
+    doc: {
+      title: "Nested Node Selector Entry",
+      titleRu: "Вложенный элемент nodeSelector",
+      summary: "Nested selector entry often used when nodeSelector is env-mapped by environment key.",
+      summaryRu: "Вложенный selector-элемент, часто используемый когда nodeSelector env-map-ится по окружению.",
+      type: "string | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/",
+      example: "nodeSelector:\n  prod:\n    kubernetes.io/hostname: worker-prod-1\n",
+    },
+  },
+  {
     pattern: ["*", "*", "*", "envVars"],
     doc: {
       title: "envVars Helper",
@@ -2140,6 +2272,18 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["*", "*", "*", "*", "configFiles", "*", "subPath"],
+    doc: {
+      title: "Config File SubPath",
+      titleRu: "SubPath config-файла",
+      summary: "Optional `subPath` value for mount when file is projected from volume.",
+      summaryRu: "Опциональное значение `subPath` для mount-а, когда файл проецируется из тома.",
+      type: "string | env-map",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/storage/volumes/#using-subpath",
+      example: "subPath: backup-script.sh\n",
+    },
+  },
+  {
     pattern: ["*", "*", "*", "configFilesYAML"],
     doc: {
       title: "configFilesYAML Helper",
@@ -2185,6 +2329,18 @@ const RULES: DocRule[] = [
       type: "map | env-map",
       docsLink: "docs/reference-values.md#param-configfilesyaml",
       example: "content:\n  db:\n    host:\n      _default: db.dev.local\n      prod: db.prod.local\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFilesYAML", "*", "content", "_include_files"],
+    doc: {
+      title: "YAML Content Include Files",
+      titleRu: "Файлы include для YAML content",
+      summary: "Loads extra YAML fragments into `content` from external files (supports env-map).",
+      summaryRu: "Подгружает дополнительные YAML-фрагменты в `content` из внешних файлов (поддерживает env-map).",
+      type: "string[] | env-map",
+      docsLink: "docs/reference-values.md#param-include-files",
+      example: "content:\n  _include_files:\n    _default:\n      - common-values.yaml\n    prod:\n      - prod-values.yaml\n",
     },
   },
   {
@@ -4581,6 +4737,26 @@ const LAST_KEY_RULES: Record<string, FieldDoc> = {
     k8sDocsLink: "https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/",
     example: "args: |-\n  - --port=8080\n  - --log-level=info\n",
   },
+  imagePullPolicy: {
+    title: "Image Pull Policy",
+    titleRu: "Политика загрузки образа",
+    summary: "Controls when kubelet pulls image (`Always`, `IfNotPresent`, `Never`).",
+    summaryRu: "Определяет, когда kubelet загружает образ (`Always`, `IfNotPresent`, `Never`).",
+    type: "string | env-map",
+    docsLinkEn: "docs/k8s-fields-guide.en.md#image",
+    docsLinkRu: "docs/k8s-fields-guide.md#image",
+    k8sDocsLink: "https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy",
+    example: "imagePullPolicy: IfNotPresent\n",
+  },
+  terminationMessagePolicy: {
+    title: "Termination Message Policy",
+    titleRu: "Политика termination message",
+    summary: "Selects source of container termination message.",
+    summaryRu: "Выбирает источник termination message контейнера.",
+    type: "string | env-map",
+    k8sDocsLink: "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#container-v1-core",
+    example: "terminationMessagePolicy: FallbackToLogsOnError\n",
+  },
   livenessProbe: {
     title: "Liveness Probe",
     titleRu: "Liveness Probe",
@@ -5135,9 +5311,6 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
   if (!APP_ENTRY_GROUP_SET.has(group) || path.length < 3) {
     return null;
   }
-  if (doc.title === "Custom or Unknown Field" && path.length !== 3) {
-    return null;
-  }
   if (path[1] === "__GroupVars__") {
     return null;
   }
@@ -5294,6 +5467,31 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
         ? "replicas:\n  _default: 2\n  prod: 4\n"
         : "replicas:\n  _default: 2\n  prod: 4\n  /stage.*/: 3\n",
     };
+  }
+
+  if (WORKLOAD_GROUP_SET.has(group) && path.length >= 4 && path[2] === "service") {
+    const serviceAllowed = [...getAllowedAppRootKeysByGroup("apps-services")].sort();
+    const serviceKey = path[3];
+    if (!serviceAllowed.includes(serviceKey)) {
+      return {
+        title: "Field Is Unusual For This Group",
+        titleRu: "Ключ нетипичен для этой группы",
+        summary: `\`${serviceKey}\` is not part of standard nested service contract in \`${group}\`.`,
+        summaryRu: `\`${serviceKey}\` не входит в стандартный nested service-контракт в \`${group}\`.`,
+        type: "custom",
+        notes: [
+          `For nested service block, expected keys are: ${formatKeyList(serviceAllowed)}.`,
+          "If this is intentional custom payload, prefer `service.extraSpec` for raw Service spec fields.",
+          `Current path: \`${path.join(".")}\`.`,
+        ],
+        notesRu: [
+          `Для nested service-блока ожидаемые ключи: ${formatKeyList(serviceAllowed)}.`,
+          "Если это намеренный custom payload, используйте `service.extraSpec` для raw-полей Service spec.",
+          `Текущий путь: \`${path.join(".")}\`.`,
+        ],
+        example: `${group}:\n  app-1:\n    service:\n      type: ClusterIP\n      ports: |-\n        - name: http\n          port: 80\n`,
+      };
+    }
   }
 
   const notes = [
