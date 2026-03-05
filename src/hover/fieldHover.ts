@@ -74,6 +74,18 @@ const BASE_APP_KEYS = [
   "reloader",
 ];
 
+const EXTENDED_APP_HELPER_KEYS = [
+  "_options",
+  "_version",
+  "_preRenderHook",
+  "_groupPreRenderHook",
+  "restartOnDeploy",
+  "restart-on-deploy",
+  "werfSkipLogs",
+  "targetPort",
+  "clusterIssuer",
+];
+
 const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-stateless": {
     purpose: "Runs long-lived stateless app workloads.",
@@ -383,6 +395,12 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   },
 };
 
+const KNOWN_INCLUDE_PROFILE_ROOT_KEYS = new Set<string>([
+  ...BASE_APP_KEYS,
+  ...EXTENDED_APP_HELPER_KEYS,
+  ...Object.values(GROUP_APP_GUIDES).flatMap((guide) => guide.keys),
+]);
+
 const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: string }>> = {
   "apps-stateless": {
     containers: { en: "Main pod containers for stateless app runtime.", ru: "Основные pod-контейнеры для runtime stateless приложения." },
@@ -605,6 +623,45 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["global", "_includes", "*"],
+    doc: {
+      title: "Include Profile Entry",
+      titleRu: "Элемент include-профиля",
+      summary: "Reusable profile payload merged by `_include` in app/group blocks.",
+      summaryRu: "Переиспользуемый payload-профиль, который мержится через `_include` в app/group блоках.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-global-includes",
+      notes: [
+        "Profile body can contain regular app fields (`containers`, `service`, `labels`, ...).",
+        "Profile itself does nothing until referenced by `_include`.",
+      ],
+      notesRu: [
+        "Тело профиля может содержать обычные app-поля (`containers`, `service`, `labels`, ...).",
+        "Сам профиль ничего не делает, пока на него не сослались через `_include`.",
+      ],
+      example: "global:\n  _includes:\n    python-backend:\n      _options:\n        component: mrms-backend\n      containers:\n        main:\n          image:\n            name: registry.example/python-backend\n",
+    },
+  },
+  {
+    pattern: ["global", "_includes", "*", "_options"],
+    doc: {
+      title: "Include Profile Options",
+      titleRu: "Опции include-профиля",
+      summary: "Chart-specific helper options consumed by custom hooks/templates.",
+      summaryRu: "Chart-specific helper-опции, которые используются custom hook-ами/шаблонами.",
+      type: "map | env-map",
+      notes: [
+        "Not interpreted by helm-apps core renderer directly.",
+        "Use for local chart conventions (labels, limits, feature toggles, etc.).",
+      ],
+      notesRu: [
+        "Не интерпретируется напрямую core-рендерером helm-apps.",
+        "Используйте для локальных соглашений чарта (labels, лимиты, feature-flags и т.д.).",
+      ],
+      example: "_options:\n  component: mrms-backend\n  metricsEnabled: true\n",
+    },
+  },
+  {
     pattern: ["*", "__GroupVars__", "type"],
     doc: {
       title: "Group Renderer Type",
@@ -619,6 +676,124 @@ const RULES: DocRule[] = [
         "Для кастомного рендерера определите шаблон `<type>.render` в templates чарта.",
       ],
       example: "custom-group:\n  __GroupVars__:\n    type: apps-stateless\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "_options"],
+    doc: {
+      title: "Chart Helper Options",
+      titleRu: "Chart helper-опции",
+      summary: "Chart-specific options map consumed by local hooks/templates for this app entry.",
+      summaryRu: "Карта chart-specific опций, используемая локальными hook-ами/шаблонами для этого app entry.",
+      type: "map | env-map",
+      notes: [
+        "Not interpreted directly by helm-apps core renderer.",
+        "Typical usage: label presets, metrics flags, rate limits, framework toggles.",
+      ],
+      notesRu: [
+        "Не интерпретируется напрямую core-рендерером helm-apps.",
+        "Типичное применение: presets для labels, флаги метрик, лимиты, framework-тогглы.",
+      ],
+      example: "_options:\n  component: mrms-backend\n  metricsEnabled: true\n  rpsLimit:\n    _default: 50\n    prod: 200\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "_options", "*"],
+    doc: {
+      title: "Chart Helper Option Entry",
+      titleRu: "Элемент chart helper-опции",
+      summary: "Single helper option key/value for chart-local hooks/templates.",
+      summaryRu: "Отдельный ключ/значение helper-опции для chart-local hook-ов/шаблонов.",
+      type: "string | number | bool | map | env-map",
+      notes: [
+        "Option semantics are defined by your chart, not by universal helm-apps contract.",
+        "Often used together with env-map branches (`_default`, `prod`, regex keys).",
+      ],
+      notesRu: [
+        "Смысл опции определяется вашим чартом, а не универсальным контрактом helm-apps.",
+        "Часто используется вместе с env-map ветками (`_default`, `prod`, regex-ключи).",
+      ],
+      example: "_options:\n  metricsEnabled:\n    _default: true\n    prod: false\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "_version"],
+    doc: {
+      title: "Chart Version Override Hint",
+      titleRu: "Подсказка переопределения версии",
+      summary: "Chart-specific version hint map used by local templates/release logic.",
+      summaryRu: "Chart-specific версия/подсказка, используемая локальными шаблонами и release-логикой.",
+      type: "string | env-map",
+      notes: [
+        "Not a universal helm-apps field.",
+        "Use only when chart templates explicitly consume this key.",
+      ],
+      notesRu: [
+        "Не является универсальным полем helm-apps.",
+        "Используйте только если шаблоны вашего чарта явно читают этот ключ.",
+      ],
+      example: "_version:\n  _default: 1.4.2\n  prod: 1.4.5\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "_preRenderHook"],
+    doc: {
+      title: "App Pre-render Hook",
+      titleRu: "App pre-render hook",
+      summary: "Template snippet executed before app render in chart-specific pipelines.",
+      summaryRu: "Шаблонный фрагмент, выполняемый до рендера app в chart-specific пайплайнах.",
+      type: "YAML block string | string",
+      example: "_preRenderHook: |-\n  {{- if not (hasKey . \"labels\") }}\n  {{- $_ := set . \"labels\" (dict) }}\n  {{- end }}\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "_groupPreRenderHook"],
+    doc: {
+      title: "Group Pre-render Hook",
+      titleRu: "Group pre-render hook",
+      summary: "Template snippet executed on group/app payload before renderer expansion.",
+      summaryRu: "Шаблонный фрагмент, выполняемый над group/app payload до renderer expansion.",
+      type: "YAML block string | string",
+      example: "_groupPreRenderHook: |-\n  {{- $_ := set . \"servicePort\" (printf \"name: %s\" .targetPort) }}\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "restartOnDeploy"],
+    doc: {
+      title: "Restart On Deploy Flag",
+      titleRu: "Флаг restartOnDeploy",
+      summary: "Chart-specific toggle forcing restart behavior on deploy cycle.",
+      summaryRu: "Chart-specific флаг, форсирующий restart-поведение на deploy-цикле.",
+      type: "bool | env-map",
+      example: "restartOnDeploy:\n  _default: false\n  prod: true\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "restart-on-deploy"],
+    doc: {
+      title: "Restart On Deploy Flag (legacy key)",
+      titleRu: "Флаг restart-on-deploy (legacy ключ)",
+      summary: "Legacy alias for restart-on-deploy chart helper option.",
+      summaryRu: "Legacy-алиас helper-ключа restart-on-deploy.",
+      type: "bool | env-map",
+      notes: [
+        "Prefer camelCase `restartOnDeploy` in new values files.",
+      ],
+      notesRu: [
+        "В новых values-файлах предпочтителен camelCase `restartOnDeploy`.",
+      ],
+      example: "restart-on-deploy: true\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "werfSkipLogs"],
+    doc: {
+      title: "Werf Skip Logs Hint",
+      titleRu: "Подсказка werfSkipLogs",
+      summary: "Chart-specific hint for deploy tooling to skip log collection/streaming.",
+      summaryRu: "Chart-specific подсказка для deploy tooling, чтобы пропускать сбор/стриминг логов.",
+      type: "bool | env-map",
+      example: "werfSkipLogs: true\n",
     },
   },
   {
@@ -1417,6 +1592,25 @@ const RULES: DocRule[] = [
       type: "bool | env-map",
       docsLink: "docs/reference-values.md#param-apps-sections",
       example: "isTemplate: true\n",
+    },
+  },
+  {
+    pattern: ["apps-custom-prometheus-rules", "*", "groups", "*", "alerts", "*", "severity"],
+    doc: {
+      title: "Prometheus Alert Severity",
+      titleRu: "Severity алерта Prometheus",
+      summary: "Convenience severity value consumed by chart hooks/templates to populate alert labels/metadata.",
+      summaryRu: "Упрощенное значение severity, которое используется chart hook-ами/шаблонами для заполнения labels/metadata алерта.",
+      type: "string | env-map",
+      notes: [
+        "Typical values: `info`, `warning`, `critical`.",
+        "If chart expects full labels in `content`, keep `severity` in sync with alert labels.",
+      ],
+      notesRu: [
+        "Типичные значения: `info`, `warning`, `critical`.",
+        "Если чарт ожидает полные labels в `content`, держите `severity` синхронным с labels алерта.",
+      ],
+      example: "severity:\n  _default: warning\n  prod: critical\n",
     },
   },
   {
@@ -2596,6 +2790,44 @@ const RULES: DocRule[] = [
       type: "number | string | env-map",
       docsLink: "docs/reference-values.md#param-ingress",
       example: "paths: |-\n  - path: /\n    pathType: Prefix\n    backend:\n      service:\n        name: app-service\n        port:\n          number: 80\n",
+    },
+  },
+  {
+    pattern: ["apps-ingresses", "*", "targetPort"],
+    doc: {
+      title: "Ingress Target Port Helper",
+      titleRu: "Хелпер targetPort для Ingress",
+      summary: "Helper field for custom ingress wrappers that derive `paths[].backend.service.port` from a short value.",
+      summaryRu: "Хелпер-поле для custom ingress-оберток, которые собирают `paths[].backend.service.port` из короткого значения.",
+      type: "string | number | env-map",
+      notes: [
+        "Used mostly in custom groups (for example `apps-routes`) with pre-render hooks.",
+        "Built-in `apps-ingresses` contract prefers explicit backend port inside `paths`.",
+      ],
+      notesRu: [
+        "Чаще используется в custom-группах (например `apps-routes`) через pre-render hook.",
+        "Во встроенном контракте `apps-ingresses` предпочтителен явный backend port внутри `paths`.",
+      ],
+      example: "targetPort: http\n# pre-render hook resolves this to service.port.name/number\n",
+    },
+  },
+  {
+    pattern: ["apps-ingresses", "*", "clusterIssuer"],
+    doc: {
+      title: "Ingress Cert ClusterIssuer",
+      titleRu: "ClusterIssuer для сертификата Ingress",
+      summary: "Certificate issuer hint used by chart-level cert-manager integration for ingress TLS.",
+      summaryRu: "Подсказка certificate issuer, используемая chart-уровневой интеграцией cert-manager для ingress TLS.",
+      type: "string | env-map",
+      notes: [
+        "Renderer support depends on chart hooks/templates.",
+        "Common value is a cert-manager `ClusterIssuer` name (for example `letsencrypt-prod`).",
+      ],
+      notesRu: [
+        "Поддержка рендера зависит от hook-ов/шаблонов конкретного чарта.",
+        "Обычно задается имя cert-manager `ClusterIssuer` (например `letsencrypt-prod`).",
+      ],
+      example: "clusterIssuer: letsencrypt-prod\n",
     },
   },
   {
@@ -5318,6 +5550,9 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
   const rootKey = path[2];
   const typical = getAllowedAppRootKeysByGroup(group);
   const typicalList = [...typical].sort();
+  if (rootKey === "<<" || rootKey.startsWith("_") || EXTENDED_APP_HELPER_KEYS.includes(rootKey)) {
+    return null;
+  }
   if (rootKey === "__AppType__") {
     return {
       ...doc,
@@ -5466,6 +5701,73 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
       example: isDefault
         ? "replicas:\n  _default: 2\n  prod: 4\n"
         : "replicas:\n  _default: 2\n  prod: 4\n  /stage.*/: 3\n",
+    };
+  }
+
+  if (path.includes("<<")) {
+    return {
+      title: "YAML Merge Key",
+      titleRu: "YAML merge-ключ",
+      summary: "YAML anchor merge key (`<<`) used to inherit fields from an aliased map.",
+      summaryRu: "YAML merge-ключ (`<<`), используемый для наследования полей из aliased map.",
+      type: "YAML merge",
+      notes: [
+        "This is YAML syntax, not a helm-apps field.",
+        "Inherited keys come from anchor (`&name`) and can be overridden by sibling fields.",
+      ],
+      notesRu: [
+        "Это синтаксис YAML, а не поле helm-apps.",
+        "Наследуемые ключи приходят из anchor (`&name`) и могут переопределяться соседними полями.",
+      ],
+      example: "base: &base\n  enabled: true\napp:\n  <<: *base\n  enabled: false\n",
+    };
+  }
+
+  if (group === "global" && app === "_includes") {
+    const profileName = path[2];
+    const profileRootKey = path[3];
+    if (path.length === 3) {
+      return {
+        title: "Include Profile Entry",
+        titleRu: "Элемент include-профиля",
+        summary: `Reusable profile \`${profileName}\` merged via app/group \`_include\`.`,
+        summaryRu: `Переиспользуемый профиль \`${profileName}\`, который мержится через app/group \`_include\`.`,
+        type: "map",
+        docsLink: "docs/reference-values.md#param-global-includes",
+        notes: [
+          "Profile body may include app-like keys (`containers`, `service`, `labels`, ...).",
+          "Profile is inert until referenced from `_include`.",
+        ],
+        notesRu: [
+          "Тело профиля может включать app-подобные ключи (`containers`, `service`, `labels`, ...).",
+          "Профиль не применяется, пока на него не сослались через `_include`.",
+        ],
+        example: "global:\n  _includes:\n    app-default:\n      enabled: true\n",
+      };
+    }
+
+    const knownRoot = typeof profileRootKey === "string" && KNOWN_INCLUDE_PROFILE_ROOT_KEYS.has(profileRootKey);
+    return {
+      title: knownRoot ? "Include Profile Field" : "Custom Include Profile Field",
+      titleRu: knownRoot ? "Поле include-профиля" : "Кастомное поле include-профиля",
+      summary: knownRoot
+        ? `\`${key}\` is part of include profile \`${profileName}\` payload.`
+        : `\`${key}\` is custom payload inside include profile \`${profileName}\`.`,
+      summaryRu: knownRoot
+        ? `\`${key}\` является частью payload include-профиля \`${profileName}\`.`
+        : `\`${key}\` — кастомный payload внутри include-профиля \`${profileName}\`.`,
+      type: knownRoot ? "profile field" : "custom profile field",
+      notes: [
+        "Include profile fields are merged into target app/group by `_include`.",
+        "Effective meaning depends on where profile is attached (workload, ingress, service, ...).",
+        `Current path: \`${path.join(".")}\`.`,
+      ],
+      notesRu: [
+        "Поля include-профиля мержатся в целевой app/group через `_include`.",
+        "Итоговый смысл зависит от контекста применения профиля (workload, ingress, service, ...).",
+        `Текущий путь: \`${path.join(".")}\`.`,
+      ],
+      example: "global:\n  _includes:\n    app-default:\n      containers:\n        main:\n          image:\n            name: registry.example/app\n",
     };
   }
 

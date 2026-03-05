@@ -60,10 +60,14 @@ test("returns unusual-field doc for unsupported root key under built-in app", ()
   assert.equal(doc?.title, "Field Is Unusual For This Group");
 });
 
-test("unsupported nested keys under unsupported root stay in unusual-field mode", () => {
+test("underscore helper roots use dedicated chart-helper docs", () => {
   const doc = findFieldDoc(["apps-stateless", "nginx", "_options", "metricsEnabled"]);
   assert.ok(doc);
-  assert.equal(doc?.title, "Field Is Unusual For This Group");
+  assert.equal(doc?.title, "Chart Helper Option Entry");
+
+  const envOverride = findFieldDoc(["apps-stateless", "nginx", "_options", "metricsEnabled", "prod"]);
+  assert.ok(envOverride);
+  assert.equal(envOverride?.title, "Environment-specific Override Branch");
 });
 
 test("returns unknown-field doc for nested custom key inside supported root block", () => {
@@ -80,6 +84,22 @@ test("env-map branches have dedicated docs instead of unknown fallback", () => {
   const envBranch = findFieldDoc(["apps-stateless", "api", "replicas", "prod"]);
   assert.ok(envBranch);
   assert.equal(envBranch?.title, "Environment-specific Override Branch");
+});
+
+test("yaml merge key returns dedicated helper doc", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "<<"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "YAML Merge Key");
+});
+
+test("include profile payload path gets dedicated include-profile hover", () => {
+  const profile = findFieldDoc(["global", "_includes", "python-backend"]);
+  assert.ok(profile);
+  assert.equal(profile?.title, "Include Profile Entry");
+
+  const nested = findFieldDoc(["global", "_includes", "python-backend", "containers", "main"]);
+  assert.ok(nested);
+  assert.equal(nested?.title, "Include Profile Field");
 });
 
 test("returns resources doc for kafka-strimzi app resources key", () => {
@@ -388,6 +408,30 @@ test("legacy ingress servicePort is marked as unusual for current contract", () 
   assert.equal(doc?.title, "Field Is Unusual For This Group");
 });
 
+test("ingress targetPort/clusterIssuer helper fields have dedicated docs", () => {
+  const targetPort = findFieldDoc(["apps-ingresses", "api", "targetPort"]);
+  assert.ok(targetPort);
+  assert.equal(targetPort?.title, "Ingress Target Port Helper");
+
+  const issuer = findFieldDoc(["apps-ingresses", "api", "clusterIssuer"]);
+  assert.ok(issuer);
+  assert.equal(issuer?.title, "Ingress Cert ClusterIssuer");
+});
+
+test("chart-level helper flags have dedicated docs", () => {
+  const restart = findFieldDoc(["apps-stateless", "api", "restartOnDeploy"]);
+  assert.ok(restart);
+  assert.equal(restart?.title, "Restart On Deploy Flag");
+
+  const restartLegacy = findFieldDoc(["apps-stateless", "api", "restart-on-deploy"]);
+  assert.ok(restartLegacy);
+  assert.equal(restartLegacy?.title, "Restart On Deploy Flag (legacy key)");
+
+  const werfSkipLogs = findFieldDoc(["apps-stateless", "api", "werfSkipLogs"]);
+  assert.ok(werfSkipLogs);
+  assert.equal(werfSkipLogs?.title, "Werf Skip Logs Hint");
+});
+
 test("hover notes keep purpose hint but avoid redundant group-context label", () => {
   const doc = findFieldDoc(["apps-ingresses", "api", "dexAuth"]);
   assert.ok(doc);
@@ -449,6 +493,14 @@ test("custom prometheus rules nested nodes have dedicated docs", () => {
   const alertContent = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules", "alerts", "highErrorRate", "content"]);
   assert.ok(alertContent);
   assert.equal(alertContent?.title, "Prometheus Alert Content");
+
+  const severity = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules", "alerts", "highErrorRate", "severity"]);
+  assert.ok(severity);
+  assert.equal(severity?.title, "Prometheus Alert Severity");
+
+  const severityEnv = findFieldDoc(["apps-custom-prometheus-rules", "slo", "groups", "app.rules", "alerts", "highErrorRate", "severity", "prod"]);
+  assert.ok(severityEnv);
+  assert.equal(severityEnv?.title, "Environment-specific Override Branch");
 });
 
 test("k8s manifests dedicated top-level fields have explicit docs", () => {
