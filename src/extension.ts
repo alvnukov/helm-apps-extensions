@@ -712,9 +712,9 @@ async function resolveHappPathCandidates(configuredPath: string): Promise<string
   const fallbackAbsPaths = new Set<string>();
   const barePrimary = primary === "happ";
 
-  if (!barePrimary) {
-    candidates.push(primary);
-  }
+  // Always try configured binary first.
+  // For default `happ`, this means PATH is preferred for end users.
+  candidates.push(primary);
 
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     const root = folder.uri.fsPath;
@@ -739,11 +739,6 @@ async function resolveHappPathCandidates(configuredPath: string): Promise<string
     } catch {
       // ignore missing candidate
     }
-  }
-
-  if (barePrimary) {
-    // Prefer local dev binaries first; use PATH `happ` only as last fallback.
-    candidates.push(primary);
   }
 
   return [...new Set(candidates)];
