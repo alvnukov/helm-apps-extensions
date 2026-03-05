@@ -359,10 +359,14 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
     purposeRu: "Описывает компоненты Strimzi Kafka стека.",
     keys: [
       "version",
+      "interBrokerProtocolVersion",
+      "logMessageFormatVersion",
+      "autoCreateTopicEnable",
       "replicas",
       "resources",
       "jvmOptions",
       "storage",
+      "brokers",
       "prometheusSampleLimit",
       "priorityClassName",
       "nodeSelector",
@@ -1644,6 +1648,54 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-kafka-strimzi", "*", "interBrokerProtocolVersion"],
+    doc: {
+      title: "Inter-broker Protocol Version",
+      titleRu: "Версия inter-broker протокола",
+      summary: "Kafka inter-broker protocol version override for controlled rolling upgrades.",
+      summaryRu: "Переопределение версии inter-broker протокола Kafka для контролируемых rolling-upgrade.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Keep in sync with broker `version` and upgrade plan.",
+      ],
+      notesRu: [
+        "Держите в синхроне с `version` брокера и планом обновления.",
+      ],
+      example: "interBrokerProtocolVersion: 3.7\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "logMessageFormatVersion"],
+    doc: {
+      title: "Log Message Format Version",
+      titleRu: "Версия формата log message",
+      summary: "Kafka log message format version override, usually used during version transitions.",
+      summaryRu: "Переопределение версии формата Kafka log message, обычно используется во время миграций версий.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      notes: [
+        "Set only with clear compatibility reason; default operator-managed value is usually sufficient.",
+      ],
+      notesRu: [
+        "Задавайте только при понятной причине совместимости; обычно достаточно значения по умолчанию от оператора.",
+      ],
+      example: "logMessageFormatVersion: 3.7\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "autoCreateTopicEnable"],
+    doc: {
+      title: "Auto Create Topic Flag",
+      titleRu: "Флаг авто-создания топиков",
+      summary: "Enables/disables broker-level auto topic creation.",
+      summaryRu: "Включает/выключает авто-создание топиков на уровне брокера.",
+      type: "bool | env-map",
+      docsLink: "docs/reference-values.md#param-apps-sections",
+      example: "autoCreateTopicEnable: false\n",
+    },
+  },
+  {
     pattern: ["apps-kafka-strimzi", "*", "replicas"],
     doc: {
       title: "Kafka Broker Replicas",
@@ -1834,6 +1886,56 @@ const RULES: DocRule[] = [
       type: "YAML block string | map | env-map",
       docsLink: "docs/reference-values.md#param-apps-sections",
       example: "zookeeper:\n  metricsConfig: |-\n    type: jmxPrometheusExporter\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "brokers"],
+    doc: {
+      title: "Kafka Bootstrap Endpoint Helper",
+      titleRu: "Хелпер bootstrap endpoint Kafka",
+      summary: "Chart helper block describing external/bootstrap host-port values for clients.",
+      summaryRu: "Chart helper-блок с external/bootstrap host-port значениями для клиентов.",
+      type: "map | env-map",
+      notes: [
+        "This is chart-level helper metadata, not native Strimzi CRD field.",
+      ],
+      notesRu: [
+        "Это chart-level helper-метаданные, а не нативное поле Strimzi CRD.",
+      ],
+      example: "brokers:\n  host:\n    _default: kafka.dev.example\n  port:\n    _default: 9092\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "brokers", "host"],
+    doc: {
+      title: "Kafka Bootstrap Host",
+      titleRu: "Bootstrap host Kafka",
+      summary: "Bootstrap host used by chart templates/clients for Kafka connection.",
+      summaryRu: "Bootstrap host, используемый шаблонами/клиентами чарта для подключения к Kafka.",
+      type: "string | env-map",
+      example: "brokers:\n  host:\n    _default: kafka.dev.example\n    prod: kafka.prod.example\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "brokers", "hosts"],
+    doc: {
+      title: "Kafka Bootstrap Hosts",
+      titleRu: "Bootstrap hosts Kafka",
+      summary: "Alternative plural host field used in some chart variants for bootstrap endpoints.",
+      summaryRu: "Альтернативное поле host-ов (мн.ч.), используемое некоторыми вариантами чартов для bootstrap endpoints.",
+      type: "YAML block string | string[] | env-map",
+      example: "brokers:\n  hosts:\n    _default: |-\n      - kafka-0.dev.example\n      - kafka-1.dev.example\n",
+    },
+  },
+  {
+    pattern: ["apps-kafka-strimzi", "*", "brokers", "port"],
+    doc: {
+      title: "Kafka Bootstrap Port",
+      titleRu: "Bootstrap порт Kafka",
+      summary: "Bootstrap port used by chart templates/clients for Kafka connection.",
+      summaryRu: "Bootstrap порт, используемый шаблонами/клиентами чарта для подключения к Kafka.",
+      type: "number | string | env-map",
+      example: "brokers:\n  port:\n    _default: 9092\n    prod: 9094\n",
     },
   },
   {
@@ -5664,11 +5766,14 @@ function schemaFieldDoc(path: string[]): FieldDoc | null {
 }
 
 function unknownFieldDoc(path: string[]): FieldDoc | null {
-  if (path.length < 3) {
+  if (path.length < 2) {
     return null;
   }
   const group = path[0];
   const app = path[1];
+  if (path.length < 3 && group !== "global") {
+    return null;
+  }
   const key = path[path.length - 1];
   const root = loadSchemaRoot();
   const parentPath = path.slice(0, -1);
@@ -5701,6 +5806,46 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
       example: isDefault
         ? "replicas:\n  _default: 2\n  prod: 4\n"
         : "replicas:\n  _default: 2\n  prod: 4\n  /stage.*/: 3\n",
+    };
+  }
+
+  if (group === "global" && app !== "_includes") {
+    const globalKey = path[1];
+    if (path.length === 2) {
+      return {
+        title: "Custom Global Setting",
+        titleRu: "Кастомная глобальная настройка",
+        summary: `Chart-level global key \`${globalKey}\` used by local templates/hooks.`,
+        summaryRu: `Глобальный ключ уровня чарта \`${globalKey}\`, используемый локальными шаблонами/hook-ами.`,
+        type: "custom global field",
+        notes: [
+          "Not part of universal helm-apps global contract (`env`, `_includes`, `deploy`, `releases`).",
+          "Keep names explicit and stable because many templates may depend on this key.",
+        ],
+        notesRu: [
+          "Не входит в универсальный global-контракт helm-apps (`env`, `_includes`, `deploy`, `releases`).",
+          "Держите имена явными и стабильными, так как на них могут зависеть многие шаблоны.",
+        ],
+        example: `global:\n  ${globalKey}:\n    _default: value\n`,
+      };
+    }
+    return {
+      title: "Custom Global Value",
+      titleRu: "Кастомное глобальное значение",
+      summary: `Nested value of custom global key \`${globalKey}\`.`,
+      summaryRu: `Вложенное значение кастомного глобального ключа \`${globalKey}\`.`,
+      type: "string | number | bool | map | env-map",
+      notes: [
+        "Usually consumed by chart-specific templates/helpers.",
+        "Can be organized as env-map (`_default`, env keys, regex keys) when environment overrides are needed.",
+        `Current path: \`${path.join(".")}\`.`,
+      ],
+      notesRu: [
+        "Обычно используется chart-specific шаблонами/helper-ами.",
+        "При необходимости env-overrides удобно оформлять как env-map (`_default`, env-ключи, regex-ключи).",
+        `Текущий путь: \`${path.join(".")}\`.`,
+      ],
+      example: `global:\n  ${globalKey}:\n    _default: value\n    prod: value-prod\n`,
     };
   }
 

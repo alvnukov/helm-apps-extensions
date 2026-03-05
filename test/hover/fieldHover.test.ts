@@ -54,6 +54,16 @@ test("returns explicit doc for releases matrix", () => {
   assert.equal(doc?.title, "Release Matrix");
 });
 
+test("custom global keys and nested values have dedicated docs", () => {
+  const globalKey = findFieldDoc(["global", "base_url"]);
+  assert.ok(globalKey);
+  assert.equal(globalKey?.title, "Custom Global Setting");
+
+  const globalNested = findFieldDoc(["global", "base_url", "prod"]);
+  assert.ok(globalNested);
+  assert.equal(globalNested?.title, "Custom Global Value");
+});
+
 test("returns unusual-field doc for unsupported root key under built-in app", () => {
   const doc = findFieldDoc(["apps-stateless", "nginx", "myCustomFlag"]);
   assert.ok(doc);
@@ -271,6 +281,18 @@ test("kafka-strimzi nested zookeeper/entityOperator fields have dedicated docs",
   const zkStorageSize = findFieldDoc(["apps-kafka-strimzi", "kafka", "zookeeper", "storage", "size"]);
   assert.ok(zkStorageSize);
   assert.equal(zkStorageSize?.title, "Zookeeper Storage Size");
+
+  const autoCreateTopic = findFieldDoc(["apps-kafka-strimzi", "kafka", "autoCreateTopicEnable"]);
+  assert.ok(autoCreateTopic);
+  assert.equal(autoCreateTopic?.title, "Auto Create Topic Flag");
+
+  const brokerHost = findFieldDoc(["apps-kafka-strimzi", "kafka", "brokers", "host"]);
+  assert.ok(brokerHost);
+  assert.equal(brokerHost?.title, "Kafka Bootstrap Host");
+
+  const protocolVersion = findFieldDoc(["apps-kafka-strimzi", "kafka", "interBrokerProtocolVersion"]);
+  assert.ok(protocolVersion);
+  assert.equal(protocolVersion?.title, "Inter-broker Protocol Version");
 });
 
 test("custom group resolves docs by env-map __GroupVars__.type", () => {
