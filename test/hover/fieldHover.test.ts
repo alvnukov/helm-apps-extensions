@@ -155,6 +155,16 @@ my-apps:
   assert.equal(doc?.title, "Containers Spec");
 });
 
+test("container image leaf fields have explicit docs", () => {
+  const imageName = findFieldDoc(["apps-stateless", "app-1", "containers", "app-1", "image", "name"]);
+  assert.ok(imageName);
+  assert.equal(imageName?.title, "Container Image Repository");
+
+  const imageTag = findFieldDoc(["apps-stateless", "app-1", "containers", "app-1", "image", "staticTag"]);
+  assert.ok(imageTag);
+  assert.equal(imageTag?.title, "Container Image Tag");
+});
+
 test("custom group resolves docs by env-map __GroupVars__.type", () => {
   const yaml = `global:
   env: prod
@@ -168,6 +178,27 @@ apps-routes:
   const doc = findFieldDoc(["apps-routes", "ui", "host"], { documentText: yaml });
   assert.ok(doc);
   assert.equal(doc?.title, "Ingress Host");
+});
+
+test("nested workload service keys reuse standalone service docs", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "service", "clusterIP"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Service ClusterIP");
+});
+
+test("custom workload group resolves nested service docs through effective type", () => {
+  const yaml = `global:
+  env: dev
+workload-custom:
+  __GroupVars__:
+    type: apps-stateless
+  app-1:
+    service:
+      clusterIP: 10.96.10.25
+`;
+  const doc = findFieldDoc(["workload-custom", "app-1", "service", "clusterIP"], { documentText: yaml });
+  assert.ok(doc);
+  assert.equal(doc?.title, "Service ClusterIP");
 });
 
 test("path-specific service type doc overrides generic type", () => {
@@ -261,6 +292,14 @@ test("legacy ingress servicePort is marked as unusual for current contract", () 
   const doc = findFieldDoc(["apps-ingresses", "api", "servicePort"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Field Is Unusual For This Group");
+});
+
+test("hover notes keep purpose hint but avoid redundant group-context label", () => {
+  const doc = findFieldDoc(["apps-ingresses", "api", "dexAuth"]);
+  assert.ok(doc);
+  assert.equal((doc?.notes ?? []).some((note) => note.includes("Group context:")), false);
+  assert.equal((doc?.notesRu ?? []).some((note) => note.includes("Контекст группы:")), false);
+  assert.equal((doc?.notesRu ?? []).some((note) => note.includes("Ingress маршрутизацию")), true);
 });
 
 test("standalone service clusterIP has explicit context doc", () => {

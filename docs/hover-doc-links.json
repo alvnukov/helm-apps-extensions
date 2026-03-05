@@ -23,6 +23,7 @@
     "docs/reference-values.md#param-apps-sections",
     "docs/reference-values.md#param-configfiles",
     "docs/reference-values.md#param-configfilesyaml",
+    "docs/reference-values.md#param-containers",
     "docs/reference-values.md#param-envvars-usage",
     "docs/reference-values.md#param-envyaml",
     "docs/reference-values.md#param-fromsecretsenvvars",

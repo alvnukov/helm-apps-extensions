@@ -4,6 +4,7 @@ import YAML from "yaml";
 import {
   APP_ENTRY_GROUP_SET,
   BUILTIN_GROUP_SET,
+  WORKLOAD_GROUP_SET,
   getAllowedAppRootKeysByGroup,
 } from "../catalog/entityGroups";
 
@@ -1780,6 +1781,54 @@ const RULES: DocRule[] = [
         "For complex k8s snippets prefer block-string fields where group contract expects it.",
       ],
       example: "containers:\n  app:\n    image:\n      name: nginx\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "containers", "*", "image", "name"],
+    doc: {
+      title: "Container Image Repository",
+      titleRu: "Репозиторий образа контейнера",
+      summary: "Image repository/name for main workload container.",
+      summaryRu: "Репозиторий/имя образа для основного контейнера workload-а.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-containers",
+      example: "containers:\n  app:\n    image:\n      name: ghcr.io/acme/platform-api\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "containers", "*", "image", "staticTag"],
+    doc: {
+      title: "Container Image Tag",
+      titleRu: "Тег образа контейнера",
+      summary: "Fixed image tag used for container deployment.",
+      summaryRu: "Фиксированный тег образа, используемый при деплое контейнера.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-containers",
+      example: "containers:\n  app:\n    image:\n      staticTag: \"1.0.0\"\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "initContainers", "*", "image", "name"],
+    doc: {
+      title: "Init Container Image Repository",
+      titleRu: "Репозиторий образа init-контейнера",
+      summary: "Image repository/name for init container.",
+      summaryRu: "Репозиторий/имя образа для init-контейнера.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-containers",
+      example: "initContainers:\n  wait-db:\n    image:\n      name: busybox\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "initContainers", "*", "image", "staticTag"],
+    doc: {
+      title: "Init Container Image Tag",
+      titleRu: "Тег образа init-контейнера",
+      summary: "Fixed image tag for init container.",
+      summaryRu: "Фиксированный тег образа для init-контейнера.",
+      type: "string | env-map",
+      docsLink: "docs/reference-values.md#param-containers",
+      example: "initContainers:\n  wait-db:\n    image:\n      staticTag: \"1.36\"\n",
     },
   },
   {
@@ -4605,7 +4654,14 @@ function buildCandidateDocPaths(path: string[], context?: FieldDocLookupContext)
     out.push(next);
   };
 
+  const pushDerivedPaths = (base: string[]) => {
+    if (base.length >= 4 && WORKLOAD_GROUP_SET.has(base[0]) && base[2] === "service") {
+      pushPath(["apps-services", base[1], ...base.slice(3)]);
+    }
+  };
+
   pushPath(path);
+  pushDerivedPaths(path);
   if (!context?.documentText || path.length === 0) {
     return out;
   }
@@ -4619,7 +4675,9 @@ function buildCandidateDocPaths(path: string[], context?: FieldDocLookupContext)
   if (!effective || effective === group) {
     return out;
   }
-  pushPath([effective, ...path.slice(1)]);
+  const effectivePath = [effective, ...path.slice(1)];
+  pushPath(effectivePath);
+  pushDerivedPaths(effectivePath);
   return out;
 }
 
@@ -4802,8 +4860,8 @@ function specializeDocForPath(path: string[], doc: FieldDoc): FieldDoc {
   };
 
   pushNote(
-    `Group context: \`${group}\` (${guide.purpose.toLowerCase()})`,
-    `Контекст группы: \`${group}\` (${guide.purposeRu.toLowerCase()})`,
+    `Purpose hint: ${guide.purpose}`,
+    guide.purposeRu,
   );
 
   if (path.length >= 3) {
