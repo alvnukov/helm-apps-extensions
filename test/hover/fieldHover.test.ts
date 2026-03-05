@@ -54,8 +54,14 @@ test("returns explicit doc for releases matrix", () => {
   assert.equal(doc?.title, "Release Matrix");
 });
 
-test("returns unknown-field doc for custom key under app", () => {
+test("returns unusual-field doc for unsupported root key under built-in app", () => {
   const doc = findFieldDoc(["apps-stateless", "nginx", "myCustomFlag"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
+});
+
+test("returns unknown-field doc for nested custom key inside supported root block", () => {
+  const doc = findFieldDoc(["apps-stateless", "nginx", "containers", "main", "myCustomFlag"]);
   assert.ok(doc);
   assert.equal(doc?.title, "Custom or Unknown Field");
 });

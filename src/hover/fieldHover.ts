@@ -4978,7 +4978,7 @@ function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppG
   if (!APP_ENTRY_GROUP_SET.has(group) || path.length < 3) {
     return null;
   }
-  if (doc.title === "Custom or Unknown Field") {
+  if (doc.title === "Custom or Unknown Field" && path.length !== 3) {
     return null;
   }
   if (path[1] === "__GroupVars__") {
