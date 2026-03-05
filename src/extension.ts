@@ -708,68 +708,25 @@ function normalizeHappLspArgs(args: string[]): string[] {
 
 async function resolveHappPathCandidates(configuredPath: string): Promise<string[]> {
   const primary = configuredPath.trim().length > 0 ? configuredPath.trim() : "happ";
-  const candidates: string[] = [];
-  const fallbackAbsPaths = new Set<string>();
-  const barePrimary = primary === "happ";
-
-  // Always try configured binary first.
-  // For default `happ`, this means PATH is preferred for end users.
-  candidates.push(primary);
-
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    const root = folder.uri.fsPath;
-    fallbackAbsPaths.add(path.resolve(root, "../happ/target/debug/happ"));
-    fallbackAbsPaths.add(path.resolve(root, "../happ/target/release/happ"));
-  }
-
-  const home = process.env.HOME?.trim();
-  if (home && home.length > 0) {
-    fallbackAbsPaths.add(path.join(home, "src", "happ", "target", "debug", "happ"));
-    fallbackAbsPaths.add(path.join(home, "src", "happ", "target", "release", "happ"));
-  }
-
-  for (const absPath of fallbackAbsPaths) {
-    if (absPath === primary) {
-      continue;
-    }
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await access(absPath);
-      candidates.push(absPath);
-    } catch {
-      // ignore missing candidate
-    }
-  }
-
-  return [...new Set(candidates)];
+  // Do not auto-probe fallback paths inside extension.
+  // Resolution is explicit: configured path (or PATH when value is `happ`).
+  return [primary];
 }
 
 async function resolveDevHappPathOverride(context: vscode.ExtensionContext): Promise<string | undefined> {
   if (context.extensionMode !== vscode.ExtensionMode.Development) {
     return undefined;
   }
-  const raw = process.env.HELM_APPS_DEV_HAPP_PATH?.trim() ?? "";
-  const candidates = [
-    raw,
-    "/Users/zol/src/happ/target/debug/happ",
-    path.resolve(context.extensionPath, "../happ/target/debug/happ"),
-    path.resolve(context.extensionPath, "../happ/target/release/happ"),
-    process.env.HOME ? path.join(process.env.HOME, "src", "happ", "target", "debug", "happ") : "",
-    process.env.HOME ? path.join(process.env.HOME, "src", "happ", "target", "release", "happ") : "",
-  ]
-    .map((it) => it.trim())
-    .filter((it) => it.length > 0);
-
-  for (const candidate of candidates) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await access(candidate, fsConstants.X_OK);
-      return candidate;
-    } catch {
-      // keep searching
-    }
+  const candidate = process.env.HELM_APPS_DEV_HAPP_PATH?.trim() ?? "";
+  if (candidate.length === 0) {
+    return undefined;
   }
-  return undefined;
+  try {
+    await access(candidate, fsConstants.X_OK);
+    return candidate;
+  } catch {
+    return undefined;
+  }
 }
 
 type HappLspPreflight = {
