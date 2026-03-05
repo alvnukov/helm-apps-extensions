@@ -5,8 +5,18 @@ const childProcess = require("node:child_process");
 
 const extRoot = path.resolve(__dirname, "..");
 const dst = path.join(extRoot, "assets", "helm-apps");
+const pinnedRefFile = path.join(extRoot, "helm-apps.bundle-ref");
 const repo = process.env.HELM_APPS_GITHUB_REPO || "https://github.com/alvnukov/helm-apps.git";
-const ref = process.env.HELM_APPS_GITHUB_REF || "main";
+const pinnedRef = fs.existsSync(pinnedRefFile)
+  ? fs.readFileSync(pinnedRefFile, "utf8").trim()
+  : "";
+const ref = (process.env.HELM_APPS_GITHUB_REF || pinnedRef).trim();
+
+if (!ref) {
+  throw new Error(
+    "helm-apps bundle ref is empty. Set HELM_APPS_GITHUB_REF or fill helm-apps.bundle-ref in extension repo.",
+  );
+}
 
 function rmrf(p) {
   if (!fs.existsSync(p)) return;

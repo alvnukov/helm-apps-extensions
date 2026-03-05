@@ -68,10 +68,11 @@ Language intelligence is server-first (`happ` LSP); extension keeps lightweight 
 
 ## Build and bundled library
 
-`npm run build` refreshes bundled `assets/helm-apps` from GitHub before TypeScript compile.
+`npm run build` assembles bundled `assets/helm-apps` from GitHub before TypeScript compile.
+Bundled chart files are generated at build time and are not stored in git.
 
 - default repo: `https://github.com/alvnukov/helm-apps.git`
-- default ref: `main`
+- default ref: value from `helm-apps.bundle-ref` (pinned in this repo)
 - override repo: `HELM_APPS_GITHUB_REPO`
 - override ref: `HELM_APPS_GITHUB_REF`
 

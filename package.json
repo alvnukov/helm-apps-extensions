@@ -491,7 +491,7 @@
   "scripts": {
     "build": "npm run sync:library && tsc -p .",
     "watch": "tsc -w -p .",
-    "package": "vsce package",
+    "package": "npm run build && vsce package",
     "sync:library": "node ./scripts/sync-bundled-library.js",
     "generate:hover-docs": "node ./scripts/generate-hover-doc-links.js",
     "check:hover-docs": "node ./scripts/check-hover-doc-links.js",
