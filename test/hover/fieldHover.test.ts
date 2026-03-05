@@ -633,6 +633,23 @@ test("jobs completionMode key has dedicated job doc", () => {
   assert.equal(doc?.title, "Job Completion Mode");
 });
 
+test("cronjob-only keys under apps-jobs are marked unusual with migration hints", () => {
+  const concurrency = findFieldDoc(["apps-jobs", "manual", "concurrencyPolicy"]);
+  assert.ok(concurrency);
+  assert.equal(concurrency?.title, "Field Is Unusual For This Group");
+  assert.ok((concurrency?.notes ?? []).some((note) => note.includes("apps-cronjobs")));
+
+  const successHistory = findFieldDoc(["apps-jobs", "manual", "successfulJobsHistoryLimit"]);
+  assert.ok(successHistory);
+  assert.equal(successHistory?.title, "Field Is Unusual For This Group");
+  assert.ok((successHistory?.notes ?? []).some((note) => note.includes("apps-cronjobs")));
+
+  const failHistory = findFieldDoc(["apps-jobs", "manual", "failedJobsHistoryLimit"]);
+  assert.ok(failHistory);
+  assert.equal(failHistory?.title, "Field Is Unusual For This Group");
+  assert.ok((failHistory?.notes ?? []).some((note) => note.includes("apps-cronjobs")));
+});
+
 test("cronjobs suspend key has dedicated scheduling doc", () => {
   const doc = findFieldDoc(["apps-cronjobs", "sync-cache", "suspend"]);
   assert.ok(doc);

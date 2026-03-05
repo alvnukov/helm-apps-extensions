@@ -1058,6 +1058,57 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-jobs", "*", "concurrencyPolicy"],
+    doc: {
+      title: "CronJob-only Field in Job (legacy)",
+      titleRu: "Поле только для CronJob в Job (legacy)",
+      summary: "`concurrencyPolicy` belongs to `apps-cronjobs`; plain `apps-jobs` ignores this key.",
+      summaryRu: "`concurrencyPolicy` относится к `apps-cronjobs`; в обычном `apps-jobs` этот ключ игнорируется.",
+      type: "Allow | Forbid | Replace | env-map",
+      notes: [
+        "Move this workload to `apps-cronjobs` if schedule/concurrency behavior is required.",
+      ],
+      notesRu: [
+        "Перенесите workload в `apps-cronjobs`, если нужна логика расписания/конкурентности.",
+      ],
+      example: "apps-cronjobs:\n  cleanup:\n    schedule: \"*/5 * * * *\"\n    concurrencyPolicy: Forbid\n",
+    },
+  },
+  {
+    pattern: ["apps-jobs", "*", "successfulJobsHistoryLimit"],
+    doc: {
+      title: "CronJob Success History in Job (legacy)",
+      titleRu: "История успешных CronJob в Job (legacy)",
+      summary: "`successfulJobsHistoryLimit` is a CronJob field; `apps-jobs` renderer does not consume it.",
+      summaryRu: "`successfulJobsHistoryLimit` — поле CronJob; рендерер `apps-jobs` его не использует.",
+      type: "number | env-map",
+      notes: [
+        "Use `apps-cronjobs` when you need successful/failed history retention controls.",
+      ],
+      notesRu: [
+        "Используйте `apps-cronjobs`, если нужны настройки хранения истории успешных/ошибочных запусков.",
+      ],
+      example: "apps-cronjobs:\n  cleanup:\n    successfulJobsHistoryLimit: 3\n",
+    },
+  },
+  {
+    pattern: ["apps-jobs", "*", "failedJobsHistoryLimit"],
+    doc: {
+      title: "CronJob Failed History in Job (legacy)",
+      titleRu: "История неуспешных CronJob в Job (legacy)",
+      summary: "`failedJobsHistoryLimit` is a CronJob field; `apps-jobs` renderer does not consume it.",
+      summaryRu: "`failedJobsHistoryLimit` — поле CronJob; рендерер `apps-jobs` его не использует.",
+      type: "number | env-map",
+      notes: [
+        "Use `apps-cronjobs` for retention control of failed runs.",
+      ],
+      notesRu: [
+        "Для управления хранением ошибочных запусков используйте `apps-cronjobs`.",
+      ],
+      example: "apps-cronjobs:\n  cleanup:\n    failedJobsHistoryLimit: 1\n",
+    },
+  },
+  {
     pattern: ["apps-cronjobs", "*", "schedule"],
     doc: {
       title: "CronJob Schedule",
