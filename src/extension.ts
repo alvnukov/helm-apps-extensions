@@ -3310,28 +3310,32 @@ async function provideCodeActions(
 
   const unresolved = (context?.diagnostics ?? []).find((d) =>
     typeof d.code === "string" && d.code.startsWith("E_UNRESOLVED_INCLUDE:"));
-  if (unresolved) {
-    const includeName = String(unresolved.code).slice("E_UNRESOLVED_INCLUDE:".length).trim();
-    if (/^[A-Za-z0-9_.-]+$/.test(includeName)) {
-      const action = new vscode.CodeAction(`Create include profile '${includeName}'`, vscode.CodeActionKind.QuickFix);
-      action.edit = new vscode.WorkspaceEdit();
-      const insertion = buildIncludeProfileInsertion(document, includeName);
-      action.edit.insert(document.uri, insertion.position, insertion.text);
-      actions.push(action);
+  const includeNameFromDiagnostic = unresolved
+    ? String(unresolved.code).slice("E_UNRESOLVED_INCLUDE:".length).trim()
+    : "";
+  const unresolvedIncludeNames = await findUnresolvedIncludeNamesAtLine(document, lineNumber);
+  const includeName = /^[A-Za-z0-9_.-]+$/.test(includeNameFromDiagnostic)
+    ? includeNameFromDiagnostic
+    : (unresolvedIncludeNames[0] ?? "");
+  if (/^[A-Za-z0-9_.-]+$/.test(includeName)) {
+    const action = new vscode.CodeAction(`Create include profile '${includeName}'`, vscode.CodeActionKind.QuickFix);
+    action.edit = new vscode.WorkspaceEdit();
+    const insertion = buildIncludeProfileInsertion(document, includeName);
+    action.edit.insert(document.uri, insertion.position, insertion.text);
+    actions.push(action);
 
-      const includeFileTarget = await findFirstExistingIncludeFile(document);
-      if (includeFileTarget) {
-        const targetDoc = await vscode.workspace.openTextDocument(includeFileTarget);
-        if (findTopLevelKeyLine(targetDoc.getText(), includeName) < 0) {
-          const actionInFile = new vscode.CodeAction(
-            `Create include profile '${includeName}' in ${path.basename(includeFileTarget.fsPath)}`,
-            vscode.CodeActionKind.QuickFix,
-          );
-          actionInFile.edit = new vscode.WorkspaceEdit();
-          const insertionInFile = buildIncludeProfileInsertionForIncludeFile(targetDoc, includeName);
-          actionInFile.edit.insert(targetDoc.uri, insertionInFile.position, insertionInFile.text);
-          actions.push(actionInFile);
-        }
+    const includeFileTarget = await findFirstExistingIncludeFile(document);
+    if (includeFileTarget) {
+      const targetDoc = await vscode.workspace.openTextDocument(includeFileTarget);
+      if (findTopLevelKeyLine(targetDoc.getText(), includeName) < 0) {
+        const actionInFile = new vscode.CodeAction(
+          `Create include profile '${includeName}' in ${path.basename(includeFileTarget.fsPath)}`,
+          vscode.CodeActionKind.QuickFix,
+        );
+        actionInFile.edit = new vscode.WorkspaceEdit();
+        const insertionInFile = buildIncludeProfileInsertionForIncludeFile(targetDoc, includeName);
+        actionInFile.edit.insert(targetDoc.uri, insertionInFile.position, insertionInFile.text);
+        actions.push(actionInFile);
       }
     }
   }
@@ -3379,6 +3383,73 @@ async function provideCodeActions(
     return undefined;
   }
   return actions;
+}
+
+async function findUnresolvedIncludeNamesAtLine(document: vscode.TextDocument, lineNumber: number): Promise<string[]> {
+  const text = document.getText();
+  const includeNames = extractIncludeNamesAtLine(text, lineNumber);
+  if (includeNames.length === 0) {
+    return [];
+  }
+
+  const definedNames = new Set(extractGlobalIncludeNames(text));
+  if (text.includes("_include_files") || text.includes("_include_from_file")) {
+    try {
+      const loaded = await loadExpandedValues(document);
+      for (const def of loaded.includeDefinitions) {
+        definedNames.add(def.name);
+      }
+    } catch {
+      // ignore include-file load errors here; provider should stay best-effort
+    }
+  }
+
+  const out: string[] = [];
+  for (const name of includeNames) {
+    if (!definedNames.has(name) && !out.includes(name)) {
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+function extractIncludeNamesAtLine(text: string, lineNumber: number): string[] {
+  const lines = text.split(/\r?\n/);
+  const line = lines[lineNumber] ?? "";
+  const out: string[] = [];
+
+  const includeKey = line.match(/^(\s*)_include:\s*(.+)\s*$/);
+  if (includeKey) {
+    const tail = includeKey[2].trim();
+    if (tail.startsWith("[") && tail.endsWith("]")) {
+      const inside = tail.slice(1, -1);
+      for (const part of inside.split(",")) {
+        const token = unquote(part.trim());
+        if (/^[A-Za-z0-9_.-]+$/.test(token)) {
+          out.push(token);
+        }
+      }
+      return out;
+    }
+    const token = unquote(tail);
+    if (/^[A-Za-z0-9_.-]+$/.test(token)) {
+      out.push(token);
+      return out;
+    }
+  }
+
+  const item = line.match(/^(\s*)-\s+(.+)\s*$/);
+  if (!item) {
+    return out;
+  }
+  if (parentKeyForLine(text, lineNumber) !== "_include") {
+    return out;
+  }
+  const token = unquote(item[2].trim());
+  if (/^[A-Za-z0-9_.-]+$/.test(token)) {
+    out.push(token);
+  }
+  return out;
 }
 
 function buildIncludeProfileInsertion(

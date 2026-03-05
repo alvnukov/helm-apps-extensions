@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import * as vscode from "vscode";
-import { suite, test } from "mocha";
+import { suite, suiteSetup, test } from "mocha";
 
 async function openFixture(relPath: string): Promise<vscode.TextEditor> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
@@ -17,7 +17,39 @@ async function waitFor(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForCodeActionTitles(
+  uri: vscode.Uri,
+  range: vscode.Range,
+  predicate: (titles: string[]) => boolean,
+  timeoutMs = 6000,
+): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  let lastTitles: string[] = [];
+
+  while (Date.now() < deadline) {
+    const quickFixActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+      "vscode.executeCodeActionProvider",
+      uri,
+      range,
+      vscode.CodeActionKind.QuickFix.value,
+    );
+    lastTitles = (quickFixActions ?? []).map((a) => a.title);
+    if (predicate(lastTitles)) {
+      return lastTitles;
+    }
+    await waitFor(150);
+  }
+
+  return lastTitles;
+}
+
 suite("helm-apps extension host smoke", () => {
+  suiteSetup(async () => {
+    await vscode.workspace
+      .getConfiguration("helm-apps")
+      .update("languageServerMode", "fallback", vscode.ConfigurationTarget.Global);
+  });
+
   test("commands are registered", async () => {
     await vscode.extensions.getExtension("alvnukov.helm-apps")?.activate();
     const commands = await vscode.commands.getCommands(true);
@@ -87,24 +119,27 @@ suite("helm-apps extension host smoke", () => {
 
   test("code actions contain unresolved-include and list-policy quick fixes", async () => {
     const editor = await openFixture("e2e/values.yaml");
-    await waitFor(500);
     const includeRange = new vscode.Range(new vscode.Position(11, 0), new vscode.Position(11, 20));
-    const includeActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-      "vscode.executeCodeActionProvider",
+    const includeTitles = await waitForCodeActionTitles(
       editor.document.uri,
       includeRange,
+      (titles) => titles.some((t) => t.includes("missing-profile")),
     );
-    const includeTitles = (includeActions ?? []).map((a) => a.title);
-    assert.ok(includeTitles.some((t) => t.includes("Create include profile 'missing-profile'")));
+    assert.ok(
+      includeTitles.some((t) => t.includes("missing-profile")),
+      `include quick-fix not found, got: ${includeTitles.join(" | ")}`,
+    );
 
     const listRange = new vscode.Range(new vscode.Position(16, 0), new vscode.Position(16, 20));
-    const listActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-      "vscode.executeCodeActionProvider",
+    const listTitles = await waitForCodeActionTitles(
       editor.document.uri,
       listRange,
+      (titles) => titles.some((t) => t.includes("Convert native list to YAML block string")),
     );
-    const listTitles = (listActions ?? []).map((a) => a.title);
-    assert.ok(listTitles.some((t) => t.includes("Convert native list to YAML block string")));
+    assert.ok(
+      listTitles.some((t) => t.includes("Convert native list to YAML block string")),
+      `list-policy quick-fix not found, got: ${listTitles.join(" | ")}`,
+    );
   });
 
   test("code actions suggest include quick fix for scalar _include", async () => {
@@ -116,15 +151,16 @@ suite("helm-apps extension host smoke", () => {
           "    _include: missing-profile-scalar",
         );
       });
-      await waitFor(500);
       const includeRange = new vscode.Range(new vscode.Position(9, 0), new vscode.Position(9, 40));
-      const includeActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-        "vscode.executeCodeActionProvider",
-        editor.document.uri,
-        includeRange,
-      );
-      const includeTitles = (includeActions ?? []).map((a) => a.title);
-      assert.ok(includeTitles.some((t) => t.includes("Create include profile 'missing-profile-scalar'")));
+    const includeTitles = await waitForCodeActionTitles(
+      editor.document.uri,
+      includeRange,
+      (titles) => titles.some((t) => t.includes("missing-profile-scalar")),
+    );
+    assert.ok(
+      includeTitles.some((t) => t.includes("missing-profile-scalar")),
+      `scalar include quick-fix not found, got: ${includeTitles.join(" | ")}`,
+    );
     } finally {
       await vscode.commands.executeCommand("workbench.action.files.revert");
     }
