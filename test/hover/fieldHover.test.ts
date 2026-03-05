@@ -181,6 +181,32 @@ test("container image leaf fields have explicit docs", () => {
   assert.equal(imageTag?.title, "Container Image Tag");
 });
 
+test("container envVars entry has dedicated doc", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "containers", "main", "envVars", "LOG_LEVEL"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Container envVars Entry");
+});
+
+test("configmaps and secrets data entries have dedicated docs", () => {
+  const cfgEntry = findFieldDoc(["apps-configmaps", "cfg", "data", "APP_MODE"]);
+  assert.ok(cfgEntry);
+  assert.equal(cfgEntry?.title, "ConfigMap Data Entry");
+
+  const secretEntry = findFieldDoc(["apps-secrets", "main", "data", "DB_PASSWORD"]);
+  assert.ok(secretEntry);
+  assert.equal(secretEntry?.title, "Secret Data Entry");
+});
+
+test("container config file content paths have dedicated docs", () => {
+  const textContent = findFieldDoc(["apps-stateless", "api", "containers", "main", "configFiles", "app.yaml", "content"]);
+  assert.ok(textContent);
+  assert.equal(textContent?.title, "Config File Content");
+
+  const yamlContent = findFieldDoc(["apps-stateless", "api", "containers", "main", "configFilesYAML", "app.yaml", "content"]);
+  assert.ok(yamlContent);
+  assert.equal(yamlContent?.title, "YAML Config File Content");
+});
+
 test("custom group resolves docs by env-map __GroupVars__.type", () => {
   const yaml = `global:
   env: prod

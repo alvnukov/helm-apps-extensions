@@ -949,6 +949,18 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-configmaps", "*", "data", "*"],
+    doc: {
+      title: "ConfigMap Data Entry",
+      titleRu: "Элемент data в ConfigMap",
+      summary: "Single key/value entry rendered into ConfigMap `data`.",
+      summaryRu: "Отдельный key/value элемент, рендеримый в ConfigMap `data`.",
+      type: "string | number | bool | env-map | YAML block string",
+      docsLink: "docs/reference-values.md#param-apps-configmaps",
+      example: "data:\n  APP_MODE:\n    _default: dev\n    prod: prod\n",
+    },
+  },
+  {
     pattern: ["apps-configmaps", "*", "binaryData"],
     doc: {
       title: "ConfigMap Binary Data",
@@ -968,6 +980,18 @@ const RULES: DocRule[] = [
       summary: "Helper map merged into ConfigMap `data`; useful for env-map overrides by environment.",
       summaryRu: "Helper-map, который сливается в ConfigMap `data`; удобен для env-map переопределений по окружению.",
       type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-configmaps",
+      example: "envVars:\n  LOG_LEVEL:\n    _default: info\n    prod: warn\n",
+    },
+  },
+  {
+    pattern: ["apps-configmaps", "*", "envVars", "*"],
+    doc: {
+      title: "ConfigMap envVars Entry",
+      titleRu: "Элемент envVars в ConfigMap",
+      summary: "Single env var helper entry merged into ConfigMap `data`.",
+      summaryRu: "Отдельный элемент хелпера envVars, который сливается в ConfigMap `data`.",
+      type: "string | number | bool | env-map | YAML block string",
       docsLink: "docs/reference-values.md#param-apps-configmaps",
       example: "envVars:\n  LOG_LEVEL:\n    _default: info\n    prod: warn\n",
     },
@@ -999,6 +1023,19 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["apps-secrets", "*", "data", "*"],
+    doc: {
+      title: "Secret Data Entry",
+      titleRu: "Элемент data в Secret",
+      summary: "Single key/value entry encoded into rendered `Secret.data`.",
+      summaryRu: "Отдельный key/value элемент, кодируемый в итоговый `Secret.data`.",
+      type: "string | number | bool | env-map | YAML block string",
+      docsLink: "docs/reference-values.md#param-apps-secrets",
+      k8sDocsLink: "https://kubernetes.io/docs/concepts/configuration/secret/",
+      example: "data:\n  DB_PASSWORD:\n    _default: change-me-dev\n    prod: change-me-prod\n",
+    },
+  },
+  {
     pattern: ["apps-secrets", "*", "binaryData"],
     doc: {
       title: "Legacy Secret binaryData Key",
@@ -1019,6 +1056,18 @@ const RULES: DocRule[] = [
       summary: "Helper map merged into Secret `data` (values are encoded to base64 during render).",
       summaryRu: "Helper-map, который сливается в Secret `data` (значения кодируются в base64 во время рендера).",
       type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-apps-secrets",
+      example: "envVars:\n  API_TOKEN:\n    _default: token-dev\n    prod: token-prod\n",
+    },
+  },
+  {
+    pattern: ["apps-secrets", "*", "envVars", "*"],
+    doc: {
+      title: "Secret envVars Entry",
+      titleRu: "Элемент envVars в Secret",
+      summary: "Single env var helper entry merged into Secret `data` and base64-encoded.",
+      summaryRu: "Отдельный элемент envVars, который сливается в Secret `data` и кодируется в base64.",
+      type: "string | number | bool | env-map | YAML block string",
       docsLink: "docs/reference-values.md#param-apps-secrets",
       example: "envVars:\n  API_TOKEN:\n    _default: token-dev\n    prod: token-prod\n",
     },
@@ -1971,6 +2020,42 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["*", "*", "*", "*", "envVars"],
+    doc: {
+      title: "Container envVars Helper",
+      titleRu: "Хелпер envVars контейнера",
+      summary: "Container-level env var map with env-map support.",
+      summaryRu: "Контейнерный map env-переменных с поддержкой env-map.",
+      type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-envvars-usage",
+      example: "containers:\n  app:\n    envVars:\n      LOG_LEVEL:\n        _default: info\n        prod: warn\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "envVars", "*"],
+    doc: {
+      title: "envVars Entry",
+      titleRu: "Элемент envVars",
+      summary: "Single env var key/value entry in envVars map.",
+      summaryRu: "Отдельный ключ/значение env-переменной в карте envVars.",
+      type: "string | number | bool | env-map | YAML block string",
+      docsLink: "docs/reference-values.md#param-envvars-usage",
+      example: "envVars:\n  LOG_LEVEL:\n    _default: info\n    prod: warn\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "envVars", "*"],
+    doc: {
+      title: "Container envVars Entry",
+      titleRu: "Элемент envVars контейнера",
+      summary: "Single container env var key/value entry.",
+      summaryRu: "Отдельный ключ/значение env-переменной контейнера.",
+      type: "string | number | bool | env-map | YAML block string",
+      docsLink: "docs/reference-values.md#param-envvars-usage",
+      example: "containers:\n  app:\n    envVars:\n      APP_ENV: \"{{ $.Values.global.env }}\"\n",
+    },
+  },
+  {
     pattern: ["*", "*", "*", "secretEnvVars"],
     doc: {
       title: "secretEnvVars Helper",
@@ -2019,6 +2104,42 @@ const RULES: DocRule[] = [
     },
   },
   {
+    pattern: ["*", "*", "*", "*", "configFiles"],
+    doc: {
+      title: "Container configFiles Helper",
+      titleRu: "Хелпер configFiles контейнера",
+      summary: "Container-level text config files map.",
+      summaryRu: "Container-level карта текстовых конфиг-файлов.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-configfiles",
+      example: "containers:\n  app:\n    configFiles:\n      app.yaml:\n        mountPath: /etc/app/app.yaml\n        content: |\n          key: value\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFiles", "*"],
+    doc: {
+      title: "Config File Entry",
+      titleRu: "Элемент configFiles",
+      summary: "Single config file definition (`mountPath`, `content`, optional mode fields).",
+      summaryRu: "Определение одного конфиг-файла (`mountPath`, `content`, опциональные mode-поля).",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-configfiles",
+      example: "configFiles:\n  app.yaml:\n    mountPath: /etc/app/app.yaml\n    content: |\n      key: value\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFiles", "*", "content"],
+    doc: {
+      title: "Config File Content",
+      titleRu: "Содержимое config-файла",
+      summary: "Raw text payload written into rendered config file.",
+      summaryRu: "Текстовый payload, записываемый в итоговый config-файл.",
+      type: "string | env-map | YAML block string",
+      docsLink: "docs/reference-values.md#param-configfiles",
+      example: "content: |\n  APP_MODE=prod\n  LOG_LEVEL=warn\n",
+    },
+  },
+  {
     pattern: ["*", "*", "*", "configFilesYAML"],
     doc: {
       title: "configFilesYAML Helper",
@@ -2028,6 +2149,42 @@ const RULES: DocRule[] = [
       type: "map",
       docsLink: "docs/reference-values.md#param-configfilesyaml",
       example: "configFilesYAML:\n  app.yaml:\n    mountPath: /etc/app/app.yaml\n    content:\n      key:\n        _default: value\n        production: prod-value\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFilesYAML"],
+    doc: {
+      title: "Container configFilesYAML Helper",
+      titleRu: "Хелпер configFilesYAML контейнера",
+      summary: "Container-level YAML-aware config files map.",
+      summaryRu: "Container-level карта YAML-aware конфиг-файлов.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-configfilesyaml",
+      example: "containers:\n  app:\n    configFilesYAML:\n      app.yaml:\n        mountPath: /etc/app/app.yaml\n        content:\n          key: value\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFilesYAML", "*"],
+    doc: {
+      title: "YAML Config File Entry",
+      titleRu: "Элемент configFilesYAML",
+      summary: "Single YAML config file definition.",
+      summaryRu: "Определение одного YAML config-файла.",
+      type: "map",
+      docsLink: "docs/reference-values.md#param-configfilesyaml",
+      example: "configFilesYAML:\n  app.yaml:\n    mountPath: /etc/app/app.yaml\n    content:\n      featureFlags:\n        useCache: true\n",
+    },
+  },
+  {
+    pattern: ["*", "*", "*", "*", "configFilesYAML", "*", "content"],
+    doc: {
+      title: "YAML Config File Content",
+      titleRu: "Содержимое YAML config-файла",
+      summary: "Structured YAML content map for generated config file.",
+      summaryRu: "Структурированная YAML-карта содержимого для генерируемого config-файла.",
+      type: "map | env-map",
+      docsLink: "docs/reference-values.md#param-configfilesyaml",
+      example: "content:\n  db:\n    host:\n      _default: db.dev.local\n      prod: db.prod.local\n",
     },
   },
   {
