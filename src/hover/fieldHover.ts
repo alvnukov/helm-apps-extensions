@@ -804,7 +804,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "containers"],
     doc: {
       title: "Stateless Containers",
-      titleRu: "Контейнеры stateless приложения",
+      titleRu: "Контейнеры stateless-приложения",
       summary: "Main runtime containers for `apps-stateless` workload.",
       summaryRu: "Основные runtime-контейнеры для workload `apps-stateless`.",
       type: "map(name -> container spec)",
@@ -824,7 +824,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "initContainers"],
     doc: {
       title: "Stateless Init Containers",
-      titleRu: "Init-контейнеры stateless приложения",
+      titleRu: "Init-контейнеры stateless-приложения",
       summary: "Startup/preparation containers executed before main `containers`.",
       summaryRu: "Подготовительные контейнеры, выполняемые до основных `containers`.",
       type: "map(name -> container spec)",
@@ -836,7 +836,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "service"],
     doc: {
       title: "Stateless Service",
-      titleRu: "Service для stateless приложения",
+      titleRu: "Service для stateless-приложения",
       summary: "Service configuration exposing this `apps-stateless` app.",
       summaryRu: "Конфигурация Service для публикации этого `apps-stateless` приложения.",
       type: "map",
@@ -854,7 +854,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "service", "ports"],
     doc: {
       title: "Stateless Service Ports",
-      titleRu: "Порты Service в stateless приложении",
+      titleRu: "Порты Service в stateless-приложении",
       summary: "Service-level ports exposed for this app.",
       summaryRu: "Порты уровня Service, публикуемые для этого приложения.",
       type: "YAML block string",
@@ -867,7 +867,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "containers", "*", "ports"],
     doc: {
       title: "Stateless Container Ports",
-      titleRu: "Порты контейнера в stateless приложении",
+      titleRu: "Порты контейнера в stateless-приложении",
       summary: "Container ports declared in pod template for this app.",
       summaryRu: "Порты контейнера, объявляемые в pod template этого приложения.",
       type: "YAML block string",
@@ -881,7 +881,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "serviceAccount"],
     doc: {
       title: "Stateless ServiceAccount Binding",
-      titleRu: "Привязка ServiceAccount для stateless приложения",
+      titleRu: "Привязка ServiceAccount для stateless-приложения",
       summary: "Identity and RBAC binding used by pods of this app.",
       summaryRu: "Идентичность и RBAC-привязка, используемые pod этого приложения.",
       type: "map | string",
@@ -893,7 +893,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "horizontalPodAutoscaler"],
     doc: {
       title: "Stateless Horizontal Autoscaler",
-      titleRu: "Горизонтальный автоскейлер stateless приложения",
+      titleRu: "Горизонтальный автоскейлер stateless-приложения",
       summary: "HPA settings for scaling pod replicas based on metrics.",
       summaryRu: "Настройки HPA для масштабирования числа pod по метрикам.",
       type: "map | YAML block string",
@@ -906,7 +906,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "verticalPodAutoscaler"],
     doc: {
       title: "Stateless Vertical Autoscaler",
-      titleRu: "Вертикальный автоскейлер stateless приложения",
+      titleRu: "Вертикальный автоскейлер stateless-приложения",
       summary: "VPA settings for automatic CPU/memory recommendation/update.",
       summaryRu: "Настройки VPA для авто-рекомендаций/обновлений CPU и памяти.",
       type: "map | YAML block string",
@@ -919,7 +919,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateless", "*", "podDisruptionBudget"],
     doc: {
       title: "Stateless PodDisruptionBudget",
-      titleRu: "PodDisruptionBudget stateless приложения",
+      titleRu: "PodDisruptionBudget для stateless-приложения",
       summary: "Availability guard controlling allowed voluntary disruptions.",
       summaryRu: "Ограничение доступности, контролирующее допустимые добровольные прерывания.",
       type: "map | YAML block string",
@@ -932,7 +932,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "containers"],
     doc: {
       title: "Stateful Containers",
-      titleRu: "Контейнеры stateful приложения",
+      titleRu: "Контейнеры stateful-приложения",
       summary: "Main runtime containers for `apps-stateful` workload.",
       summaryRu: "Основные runtime-контейнеры для workload `apps-stateful`.",
       type: "map(name -> container spec)",
@@ -943,7 +943,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "initContainers"],
     doc: {
       title: "Stateful Init Containers",
-      titleRu: "Init-контейнеры stateful приложения",
+      titleRu: "Init-контейнеры stateful-приложения",
       summary: "Init containers for state/bootstrap preparation.",
       summaryRu: "Init-контейнеры для подготовки state/bootstrap шагов.",
       type: "map(name -> container spec)",
@@ -954,7 +954,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "service"],
     doc: {
       title: "Stateful Service",
-      titleRu: "Service для stateful приложения",
+      titleRu: "Service для stateful-приложения",
       summary: "Service config for stable network endpoint of stateful app.",
       summaryRu: "Конфигурация Service для стабильного сетевого endpoint stateful приложения.",
       type: "map",
@@ -966,7 +966,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "service", "ports"],
     doc: {
       title: "Stateful Service Ports",
-      titleRu: "Порты Service в stateful приложении",
+      titleRu: "Порты Service в stateful-приложении",
       summary: "Service-level ports exposed for stateful app clients.",
       summaryRu: "Порты Service-уровня, публикуемые для клиентов stateful приложения.",
       type: "YAML block string",
@@ -978,7 +978,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "containers", "*", "ports"],
     doc: {
       title: "Stateful Container Ports",
-      titleRu: "Порты контейнера в stateful приложении",
+      titleRu: "Порты контейнера в stateful-приложении",
       summary: "Container ports declared in pod template for stateful workload.",
       summaryRu: "Порты контейнера в pod template stateful workload-а.",
       type: "YAML block string",
@@ -991,7 +991,7 @@ const RULES: DocRule[] = [
     pattern: ["apps-stateful", "*", "serviceAccount"],
     doc: {
       title: "Stateful ServiceAccount Binding",
-      titleRu: "Привязка ServiceAccount для stateful приложения",
+      titleRu: "Привязка ServiceAccount для stateful-приложения",
       summary: "Service account identity used by stateful pods.",
       summaryRu: "Идентичность service account, используемая stateful pod.",
       type: "map | string",
@@ -5412,7 +5412,8 @@ export function buildFieldDocMarkdownLocalized(path: string[], doc: FieldDoc, lo
 
   const parts: string[] = [];
   parts.push(`**${title}**`);
-  parts.push(`\`${path.join(".")}\``);
+  parts.push("");
+  parts.push(`${ru ? "Путь" : "Path"}: \`${path.join(".")}\``);
   parts.push("");
   parts.push(`**${ru ? "Назначение" : "Purpose"}**: ${summary.trim()}`);
   parts.push("");
