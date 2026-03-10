@@ -1,16 +1,8 @@
-# <img src="media/helm-apps-activity.svg" alt="helm-apps extension icon" width="28" valign="middle" /> helm-apps VS Code Extension
+# helm-apps VS Code Extension
 
-<p align="center">
-  <a href="https://github.com/alvnukov/helm-apps-extensions/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/alvnukov/helm-apps-extensions/ci.yml?style=for-the-badge&logo=githubactions&label=CI" alt="CI status" />
-  </a>
-  <a href="https://github.com/alvnukov/helm-apps-extensions/releases">
-    <img src="https://img.shields.io/github/v/tag/alvnukov/helm-apps-extensions?style=for-the-badge&label=Latest%20Release&color=0A84FF" alt="Latest release" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/alvnukov/helm-apps-extensions?style=for-the-badge&label=License" alt="License" />
-  </a>
-</p>
+[CI](https://github.com/alvnukov/helm-apps-extensions/actions/workflows/ci.yml) ·
+[Releases](https://github.com/alvnukov/helm-apps-extensions/releases) ·
+[License](LICENSE)
 
 Расширение для работы с `values.yaml` в формате `helm-apps` внутри VS Code.
 Основная логика анализа и preview работает через `happ` LSP, а клиент в VS Code остаётся лёгким и быстрым.
@@ -45,15 +37,7 @@
 
 ### Preview сущности (values и manifest)
 
-![Entity preview](media/readme/preview-entity.svg)
-
-### Контекстные действия в редакторе
-
-![Context actions](media/readme/context-actions.svg)
-
-### Настройки библиотеки в UI
-
-![Library settings](media/readme/library-settings.svg)
+См. скриншоты в репозитории в каталоге `media/readme/`.
 
 ## Требования
 
