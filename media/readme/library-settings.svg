@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="Library settings">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <rect x="28" y="28" width="1224" height="664" rx="18" fill="#111827" stroke="#334155"/>
+  <text x="58" y="86" fill="#f3f4f6" font-size="38" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Настройки библиотеки</text>
+  <rect x="58" y="118" width="1164" height="108" rx="14" fill="#1f2937" stroke="#334155"/>
+  <text x="90" y="164" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">Строгая валидация</text>
+  <text x="90" y="198" fill="#94a3b8" font-size="24" font-family="Segoe UI, Arial, sans-serif">global.validation.strict</text>
+  <rect x="1148" y="144" width="44" height="44" rx="8" fill="#2563eb"/>
+  <rect x="58" y="242" width="1164" height="108" rx="14" fill="#1f2937" stroke="#334155"/>
+  <text x="90" y="288" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">Разрешить native list в built-in полях</text>
+  <text x="90" y="322" fill="#94a3b8" font-size="24" font-family="Segoe UI, Arial, sans-serif">global.validation.allowNativeListsInBuiltInListFields</text>
+  <rect x="1148" y="268" width="44" height="44" rx="8" fill="#374151" stroke="#64748b"/>
+  <rect x="58" y="366" width="1164" height="108" rx="14" fill="#1f2937" stroke="#334155"/>
+  <text x="90" y="412" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">Проверять шаблоны fl.value</text>
+  <text x="90" y="446" fill="#94a3b8" font-size="24" font-family="Segoe UI, Arial, sans-serif">global.validation.validateFlValueTemplates</text>
+  <rect x="1148" y="392" width="44" height="44" rx="8" fill="#2563eb"/>
+  <rect x="58" y="544" width="286" height="70" rx="12" fill="#2563eb"/>
+  <text x="94" y="588" fill="#eff6ff" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Применить</text>
+  <rect x="360" y="544" width="286" height="70" rx="12" fill="#1f2937" stroke="#475569"/>
+  <text x="424" y="588" fill="#cbd5e1" font-size="28" font-family="Segoe UI, Arial, sans-serif">Справка</text>
+</svg>

@@ -3,3 +3,6 @@ out/
 *.vsix
 .vscode-test/
 assets/helm-apps/
+jetbrains/.gradle/
+jetbrains/build/
+jetbrains/.idea/

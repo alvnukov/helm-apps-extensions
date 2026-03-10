@@ -59,3 +59,9 @@ test("collects include usage for scalar _include", () => {
   assert.equal(occurrences.filter((o) => o.role === "definition").length, 1);
   assert.equal(occurrences.filter((o) => o.role === "usage").length, 1);
 });
+
+test("does not treat global._includes._include_from_file as include symbol definition", () => {
+  const yaml = `global:\n  _includes:\n    _include_from_file: include-profiles.yaml\n`;
+  const symbol = findSymbolAtPosition(yaml, 2, 8);
+  assert.equal(symbol, null);
+});

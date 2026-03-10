@@ -16,6 +16,8 @@ import { buildDependencyGraphModel } from "./language/dependencyGraph";
 import { buildHelmAppsDocumentSymbols } from "./language/documentSymbols";
 import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "./language/symbols";
 import { discoverEnvironments, findAppScopeAtLine, resolveEntityWithIncludes, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
+import { forceEntityEnabled, withManifestRenderEntityEnabled } from "./preview/entityRenderOverrides";
+import { formatManifestPreviewError } from "./preview/manifestError";
 import { expandValuesWithFileIncludes, type IncludeDefinition } from "./loader/fileIncludes";
 import { extractAppChildToGlobalInclude, safeRenameAppKey } from "./refactor/appRefactor";
 import { ValuesStructureProvider } from "./structure/valuesTreeProvider";
@@ -138,6 +140,7 @@ const DEFAULT_PREVIEW_THEME: HappPreviewTheme = {
 const ENTITY_TEMPLATE_COMMANDS: readonly EntityTemplateCommandSpec[] = ENTITY_TEMPLATE_COMMAND_SPECS;
 let insertTemplateContextTimer: NodeJS.Timeout | undefined;
 let insertTemplateContextVersion = 0;
+const INCLUDE_ENTRY_HELPER_KEYS = new Set(["_include", "_include_from_file", "_include_files"]);
 let insertTemplateContextStateKey = "";
 
 interface LibrarySettingDef {
@@ -2271,11 +2274,19 @@ async function renderEntityPreview(): Promise<void> {
       return;
     }
     const message = extractErrorMessage(err);
+    const renderText = state.options.renderMode === "manifest"
+      ? formatManifestPreviewError(err, {
+        fileUri: state.documentUri.toString(),
+        group: state.group,
+        app: state.app,
+        env: state.options.env,
+      })
+      : `# preview unavailable\n# ${message}`;
     const title = `helm-apps preview: ${state.group}.${state.app}`;
     panel.title = title;
     panel.webview.html = renderPreviewHtml(
       title,
-      `# preview unavailable\n# ${message}`,
+      renderText,
       [],
       { literals: [state.options.env], regexes: [] },
       state.options,
@@ -2345,9 +2356,10 @@ async function renderManifestFromHappLsp(
   documentText: string,
   state: EntityPreviewState,
 ): Promise<string> {
+  const requestText = withManifestRenderEntityEnabled(documentText, state.group, state.app);
   const result = await happLspClient.renderEntityManifest({
     uri: document.uri.toString(),
-    text: documentText,
+    text: requestText,
     group: state.group,
     app: state.app,
     env: state.options.env,
@@ -2478,7 +2490,7 @@ function resolvePreviewEntity(values: unknown, group: string, app: string, optio
   if (options.applyEnvResolution) {
     entity = resolveEnvMaps(entity, options.env);
   }
-  return entity;
+  return forceEntityEnabled(entity);
 }
 
 function readRawEntity(values: unknown, group: string, app: string): unknown {
@@ -2867,7 +2879,7 @@ async function provideCompletionItems(
     items.push(it);
   }
 
-  const includeItems = buildIncludeCompletionItems(text, position.line);
+  const includeItems = await buildIncludeCompletionItems(document, text, position.line);
   for (const it of includeItems) {
     items.push(it);
   }
@@ -2964,11 +2976,15 @@ function buildSchemaCompletionItems(text: string, contextPath: string[]): vscode
   return items;
 }
 
-function buildIncludeCompletionItems(text: string, line: number): vscode.CompletionItem[] {
+async function buildIncludeCompletionItems(
+  document: vscode.TextDocument,
+  text: string,
+  line: number,
+): Promise<vscode.CompletionItem[]> {
   if (parentKeyForLine(text, line) !== "_include") {
     return [];
   }
-  const includeNames = extractGlobalIncludeNames(text);
+  const includeNames = await collectAvailableIncludeNames(document, text);
   return includeNames.map((name) => {
     const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Reference);
     item.insertText = name;
@@ -3016,7 +3032,7 @@ function schemaPathForContext(text: string, contextPath: string[]): string[] {
 
 function extractGlobalIncludeNames(text: string): string[] {
   const lines = text.split(/\r?\n/);
-  const names: string[] = [];
+  const names = new Set<string>();
   let inGlobal = false;
   let inIncludes = false;
   for (let i = 0; i < lines.length; i += 1) {
@@ -3036,10 +3052,12 @@ function extractGlobalIncludeNames(text: string): string[] {
       continue;
     }
     if (inGlobal && inIncludes && indent === 4) {
-      names.push(key);
+      if (!isIncludeEntryHelperKey(key)) {
+        names.add(key);
+      }
     }
   }
-  return names;
+  return [...names].sort();
 }
 
 function parentKeyForLine(text: string, line: number): string | null {
@@ -3926,10 +3944,33 @@ function findLocalGlobalIncludeLines(document: vscode.TextDocument): Map<string,
       includeProfileIndent = indent;
     }
     if (indent === includeProfileIndent) {
-      out.set(key, i);
+      if (!isIncludeEntryHelperKey(key)) {
+        out.set(key, i);
+      }
     }
   }
   return out;
+}
+
+async function collectAvailableIncludeNames(document: vscode.TextDocument, text: string): Promise<string[]> {
+  const names = new Set(extractGlobalIncludeNames(text));
+  if (text.includes("_include_files") || text.includes("_include_from_file")) {
+    try {
+      const loaded = await loadExpandedValues(document);
+      for (const def of loaded.includeDefinitions) {
+        if (!isIncludeEntryHelperKey(def.name)) {
+          names.add(def.name);
+        }
+      }
+    } catch {
+      // ignore include-file parsing errors; completion should stay best-effort
+    }
+  }
+  return [...names].sort();
+}
+
+function isIncludeEntryHelperKey(name: string): boolean {
+  return INCLUDE_ENTRY_HELPER_KEYS.has(name);
 }
 
 function renderPreviewHtml(

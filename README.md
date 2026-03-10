@@ -1,86 +1,158 @@
-# helm-apps VS Code Extension
+# <img src="media/helm-apps-activity.svg" alt="helm-apps extension icon" width="28" valign="middle" /> helm-apps VS Code Extension
 
-VS Code tooling for `values.yaml` in `helm-apps` format.
-Language intelligence is server-first (`happ` LSP); extension keeps lightweight local logic only.
+<p align="center">
+  <a href="https://github.com/alvnukov/helm-apps-extensions/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/alvnukov/helm-apps-extensions/ci.yml?style=for-the-badge&logo=githubactions&label=CI" alt="CI status" />
+  </a>
+  <a href="https://github.com/alvnukov/helm-apps-extensions/releases">
+    <img src="https://img.shields.io/github/v/tag/alvnukov/helm-apps-extensions?style=for-the-badge&label=Latest%20Release&color=0A84FF" alt="Latest release" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/alvnukov/helm-apps-extensions?style=for-the-badge&label=License" alt="License" />
+  </a>
+</p>
 
-## Features
+Расширение для работы с `values.yaml` в формате `helm-apps` внутри VS Code.
+Основная логика анализа и preview работает через `happ` LSP, а клиент в VS Code остаётся лёгким и быстрым.
 
-- Auto-attach bundled `helm-apps` JSON Schema to `values*.yaml`.
-- Command: `helm-apps: Configure YAML schema`.
-- Command: `helm-apps: Validate current values.yaml` (reads diagnostics from active providers; basic YAML fallback without `happ`).
-- Explorer view: `helm-apps Values Structure` for visual tree of current YAML keys.
-  - Click any node to jump to its line in the file.
-- Activity Bar section: `helm-apps` with `Quick Actions`.
-  - One-click actions for scaffold, preview, validation, settings, and paste-as-helm-apps.
-- Refactor command: `helm-apps: Extract app child to global include`.
-  - Cursor on direct app child key (e.g. `labels`, `resources`) -> moves it into `global._includes.<name>` and adds `_include`.
-- Refactor command: `helm-apps: Safe rename app key`.
-  - Renames `apps-*.<app>` key and updates `global.releases.*.<app>` keys.
-- Preview command: `helm-apps: Preview resolved entity (with includes)`.
-  - Opens side panel and shows `apps-*.<app>` with options:
-    - env selection (including discovered regex keys),
-    - toggle `apply includes`,
-    - toggle `resolve env maps`.
-  - Preview loader applies `_include_from_file` and `_include_files`.
-- Navigation command: `helm-apps: Go to include definition`.
-  - Works on `_include` list items in YAML.
-  - Jumps to `global._includes.<name>` in current file or to include-file definition.
-- Symbol navigation/refactor:
-  - `Find Usages` for include/app symbols (also command: `helm-apps: Find symbol usages`).
-  - `Rename Symbol` for include/app symbols updates linked occurrences in current file.
-  - `Go to Definition` for app keys referenced from `global.releases.*`.
-- Dependency graph command: `helm-apps: Open dependency graph`.
-  - Visualizes `apps -> _include`, `global._includes`, and include-file references.
-- Clipboard import command: `helm-apps: Paste as helm-apps`.
-  - Reads Kubernetes manifests from clipboard.
-  - Converts via `happ manifests --import-strategy helpers-experimental`.
-  - Inserts converted helm-apps values into current editor (replaces selection if any).
-- Bootstrap command: `helm-apps: Create Starter helm-apps Chart`.
-  - Creates a new Helm chart scaffold from empty folder/workspace.
-  - Adds `templates/init-helm-apps-library.yaml` with required `apps-utils.init-library`.
-  - Copies bundled `helm-apps` library into `<chart>/charts/helm-apps` in unpacked form (offline, no internet).
-- Outline / Document Symbols:
-  - sections (`global`, groups), apps, include profiles, and app fields are exposed in editor Outline.
-- Hover on `_include` item shows include code snippet.
-  - Source can be local `global._includes`, include-file content, or resolved include body.
-- Library settings command: `helm-apps: Open library settings`.
-  - Opens visual settings panel with explained library options.
-  - Applies selected toggles directly into `global.*` in active `values.yaml`.
-- Library settings help command: `helm-apps: Generate library settings help`.
-  - Generates Markdown help based on current setting states.
-  - Also available from the settings panel (`Generate help` button).
-- Smart editing:
-  - Completion snippets for common app keys (`enabled`, `_include`, `resources`, `envVars`, `service`).
-  - Quick fixes:
-    - convert inline `_include: [a, b]` into multiline list,
-    - add `enabled: true` into app block,
-    - create missing include profile from `Unresolved include profile` diagnostic.
-- Semantic diagnostics:
-  - `Unresolved include profile` warning.
-  - `Unused include profile` information diagnostic.
+## Навигация
 
-## Requirements
+- Быстрый старт: [Старт здесь](#старт-здесь-самый-короткий-путь)
+- Визуальный обзор: [Как это выглядит](#как-это-выглядит)
+- Практика: [Сценарии до/после](#сценарии-допосле)
+- Возможности: [Ключевые возможности](#ключевые-возможности)
+- Команды: [Команды расширения](#команды-расширения)
+- Настройки: [Настройки](#настройки)
+- Экосистема: [Связанные репозитории](#связанные-репозитории)
 
-- VS Code YAML extension: `redhat.vscode-yaml`.
-- `happ` binary available in `PATH` (or set `helm-apps.happPath`).
-  - Used for language features via `happ` LSP when `helm-apps.languageServerMode = happ`.
-  - Also used for import/conversion commands.
+## Для кого и зачем
 
-## Build and bundled library
+| Для роли | Что дает расширение |
+|---|---|
+| Разработчик | Быстрая навигация по values, hover-подсказки по полям, безопасные refactor-операции |
+| DevOps / Platform | Предсказуемый preview сущностей и манифестов, диагностика контрактных ошибок, работа с include-графом |
+| Onboarding | Шаблоны сущностей, визуальная структура values, меньше ручного поиска по документации |
 
-`npm run build` assembles bundled `assets/helm-apps` from GitHub before TypeScript compile.
-Bundled chart files are generated at build time and are not stored in git.
+## Старт здесь (самый короткий путь)
 
-- default repo: `https://github.com/alvnukov/helm-apps.git`
-- default ref: value from `helm-apps.bundle-ref` (pinned in this repo)
-- override repo: `HELM_APPS_GITHUB_REPO`
-- override ref: `HELM_APPS_GITHUB_REF`
+1. Установить расширение из [GitHub Releases](https://github.com/alvnukov/helm-apps-extensions/releases) (`.vsix`).
+2. Убедиться, что `happ` доступен в `PATH` (или указать путь в `helm-apps.happPath`).
+3. Открыть chart с `values.yaml` в формате `helm-apps`.
+4. Выполнить команду `helm-apps: Configure YAML schema`.
+5. Выполнить `helm-apps: Preview resolved entity (with includes)` и проверить `values/manifest` preview.
 
-## Settings
+## Как это выглядит
 
-- `helm-apps.schemaFileMatch` - glob patterns for files that should use schema.
-- `helm-apps.happPath` - path to `happ` binary.
-- `helm-apps.languageServerMode` - `happ` (preferred) or `fallback`.
-- `helm-apps.happLspArgs` - args for language server process (default `["lsp"]`).
-  - If `happ` starts in partial mode, extension stays lightweight and uses only available server capabilities.
-- `helm-apps.disableYamlSchemaHover` - hides generic YAML schema hover blocks (like `Source: values.schema.json`) and keeps helm-apps contextual hover only.
+### Preview сущности (values и manifest)
+
+![Entity preview](media/readme/preview-entity.svg)
+
+### Контекстные действия в редакторе
+
+![Context actions](media/readme/context-actions.svg)
+
+### Настройки библиотеки в UI
+
+![Library settings](media/readme/library-settings.svg)
+
+## Требования
+
+- VS Code `>= 1.90`.
+- Расширение YAML: `redhat.vscode-yaml`.
+- `happ` в `PATH` (рекомендуется) или явный путь через настройку `helm-apps.happPath`.
+
+Без `happ` остаются базовые клиентские функции, но продвинутый анализ и preview ограничены.
+
+## Сценарии до/после
+
+### 1) Поиск ошибки в values
+
+До:
+- ручной просмотр include-цепочек и env-map веток;
+- много переключений между файлами.
+
+После:
+- открываете `Preview resolved entity`;
+- сразу видите итоговую сущность и итоговый manifest;
+- быстрее находите, где ломается контракт.
+
+### 2) Навигация по include-профилям
+
+До:
+- grep по проекту и ручной поиск, где объявлен профиль.
+
+После:
+- `Go to include definition` на `_include`;
+- `Find usages` по include/app символу;
+- безопасное переименование через `Safe rename app key`.
+
+### 3) Онбординг в новый chart
+
+До:
+- копирование YAML фрагментов из старых сервисов.
+
+После:
+- вставка шаблона сущности из контекстного меню;
+- hover по полям с понятным описанием, типом и примером;
+- структура `values` и настройки библиотеки доступны прямо в IDE.
+
+## Ключевые возможности
+
+| Возможность | Что делает |
+|---|---|
+| Schema auto-attach | Подключает `helm-apps` schema к `values*.yaml` |
+| Entity preview (`values/manifest`) | Показывает итог сущности с учетом include/env resolution |
+| Entity selector в preview | Переключение группа/app без закрытия окна preview |
+| Navigation | `Go to include definition`, `Find usages`, `Rename symbol`, `Go to definition` |
+| Refactor | `Extract app child to global include`, `Safe rename app key` |
+| Visual structure | Дерево `helm-apps Values Structure` с переходом к ключу |
+| Library settings UI | Панель настройки `global.*` c применением в `values.yaml` |
+| Entity templates | Вставка шаблонов сущностей по группам |
+| Dependency graph | Граф зависимостей `apps -> _include -> include files` |
+| Clipboard import | `Paste as helm-apps` (конвертация из Kubernetes manifests через `happ`) |
+
+## Команды расширения
+
+Основные команды в Command Palette (`Cmd/Ctrl+Shift+P`):
+
+- `helm-apps: Configure YAML schema`
+- `helm-apps: Validate current values.yaml`
+- `helm-apps: Preview resolved entity (with includes)`
+- `helm-apps: Go to include definition`
+- `helm-apps: Find symbol usages`
+- `helm-apps: Open dependency graph`
+- `helm-apps: Open library settings`
+- `helm-apps: Generate library settings help`
+- `helm-apps: Paste as helm-apps`
+- `helm-apps: Extract app child to global include`
+- `helm-apps: Safe rename app key`
+
+## Настройки
+
+- `helm-apps.languageServerMode`  
+  `happ` (по умолчанию, рекомендуется) или `fallback`.
+- `helm-apps.happPath`  
+  Явный путь к бинарнику `happ`, если он не находится через `PATH`.
+- `helm-apps.happLspArgs`  
+  Аргументы запуска LSP (`["lsp"]` по умолчанию).
+- `helm-apps.schemaFileMatch`  
+  Маски файлов, для которых подключается schema.
+- `helm-apps.disableYamlSchemaHover`  
+  Скрывает generic schema-hover от YAML и оставляет контекстный hover `helm-apps`.
+
+## Связанные репозитории
+
+- Helm Apps Library: [alvnukov/helm-apps](https://github.com/alvnukov/helm-apps)
+- happ CLI / LSP: [alvnukov/happ](https://github.com/alvnukov/happ)
+
+## JetBrains (beta)
+
+В репозитории добавлен JetBrains-плагин (MVP) в директории `jetbrains/`.
+Он использует тот же `happ` LSP как общее ядро, что и VS Code клиент.
+
+- Детали по плагину: [`jetbrains/README.md`](jetbrains/README.md)
+- Архитектура multi-IDE ядра: [`docs/multi-ide-architecture.md`](docs/multi-ide-architecture.md)
+
+## Лицензия
+
+Apache-2.0, см. [LICENSE](LICENSE).

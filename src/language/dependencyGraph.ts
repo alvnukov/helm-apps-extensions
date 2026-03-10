@@ -12,6 +12,8 @@ export interface DependencyGraphModel {
   includeFiles: string[];
 }
 
+const INCLUDE_ENTRY_HELPER_KEYS = new Set(["_include", "_include_from_file", "_include_files"]);
+
 export function buildDependencyGraphModel(valuesText: string): DependencyGraphModel {
   const parsed = YAML.parse(valuesText) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -53,7 +55,9 @@ function collectGlobalIncludes(root: Record<string, unknown>): string[] {
   if (!includes || typeof includes !== "object" || Array.isArray(includes)) {
     return [];
   }
-  return Object.keys(includes as Record<string, unknown>).sort();
+  return Object.keys(includes as Record<string, unknown>)
+    .filter((name) => !isIncludeEntryHelperKey(name))
+    .sort();
 }
 
 function isRenderableGroup(group: string, raw: unknown): boolean {
@@ -144,4 +148,8 @@ function countIndent(line: string): number {
     n += 1;
   }
   return n;
+}
+
+function isIncludeEntryHelperKey(name: string): boolean {
+  return INCLUDE_ENTRY_HELPER_KEYS.has(name);
 }

@@ -1,0 +1,21 @@
+<idea-plugin>
+  <id>io.github.alvnukov.helm-apps.jetbrains</id>
+  <name>helm-apps</name>
+  <vendor email="alvnukov@gmail.com" url="https://github.com/alvnukov">alvnukov</vendor>
+
+  <description><![CDATA[
+    JetBrains plugin for helm-apps values files.<br/>
+    Uses happ LSP as the shared language core.
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends optional="true" config-file="lsp.xml">com.intellij.modules.lsp</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationConfigurable
+      id="helm-apps"
+      parentId="tools"
+      instance="io.github.alvnukov.helmapps.settings.HelmAppsConfigurable"
+      displayName="helm-apps"/>
+  </extensions>
+</idea-plugin>

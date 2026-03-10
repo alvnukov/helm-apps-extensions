@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="Context actions">
+  <rect width="1280" height="720" fill="#0b1020"/>
+  <rect x="80" y="72" width="640" height="560" rx="18" fill="#1f2937" stroke="#334155"/>
+  <rect x="104" y="108" width="592" height="50" rx="10" fill="#1e3a8a"/>
+  <text x="126" y="141" fill="#eff6ff" font-size="30" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Вставить шаблон сущности</text>
+  <text x="126" y="198" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Открыть превью сущности</text>
+  <text x="126" y="246" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Перейти к определению include</text>
+  <text x="126" y="294" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Переименовать ключ приложения</text>
+  <text x="126" y="342" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Открыть настройки библиотеки</text>
+  <text x="126" y="390" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Найти использования символа</text>
+  <text x="126" y="438" fill="#e5e7eb" font-size="29" font-family="Segoe UI, Arial, sans-serif">Открыть граф зависимостей</text>
+  <rect x="760" y="220" width="440" height="330" rx="16" fill="#111827" stroke="#334155"/>
+  <text x="786" y="266" fill="#cbd5e1" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Контекстное меню</text>
+  <text x="786" y="312" fill="#93c5fd" font-size="24" font-family="Segoe UI, Arial, sans-serif">Показывает только релевантные действия</text>
+  <text x="786" y="352" fill="#93c5fd" font-size="24" font-family="Segoe UI, Arial, sans-serif">по текущему месту курсора.</text>
+  <text x="786" y="404" fill="#86efac" font-size="24" font-family="Segoe UI, Arial, sans-serif">- меньше ошибок</text>
+  <text x="786" y="440" fill="#86efac" font-size="24" font-family="Segoe UI, Arial, sans-serif">- быстрее онбординг</text>
+  <text x="786" y="476" fill="#86efac" font-size="24" font-family="Segoe UI, Arial, sans-serif">- безопаснее рефакторинг</text>
+</svg>

@@ -16,6 +16,8 @@ export interface IncludeAnalysisResult {
   unusedDefinitions: IncludeDefinitionRef[];
 }
 
+const INCLUDE_ENTRY_HELPER_KEYS = new Set(["_include", "_include_from_file", "_include_files"]);
+
 export function analyzeIncludes(
   text: string,
   fileDefinitions: Array<{ name: string }>,
@@ -62,7 +64,9 @@ function collectLocalIncludeDefinitions(text: string): IncludeDefinitionRef[] {
       continue;
     }
     if (inGlobal && inIncludes && indent === 4) {
-      out.push({ name, line: i, source: "local" });
+      if (!isIncludeEntryHelperKey(name)) {
+        out.push({ name, line: i, source: "local" });
+      }
     }
   }
 
@@ -159,4 +163,8 @@ function unquote(value: string): string {
 
 function isToken(value: string): boolean {
   return /^[A-Za-z0-9_.-]+$/.test(value);
+}
+
+function isIncludeEntryHelperKey(name: string): boolean {
+  return INCLUDE_ENTRY_HELPER_KEYS.has(name);
 }

@@ -7,69 +7,24 @@ import {
   type ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
+import {
+  collectCustomMethods,
+  DEFAULT_HAPP_LSP_ARGS,
+  HappPreviewTheme,
+  HAPP_LSP_METHODS,
+  RenderEntityManifestParams,
+  RenderEntityManifestResult,
+} from "../core/happProtocol";
 
 export const HAPP_AVAILABLE_CONTEXT_KEY = "helmApps.happAvailable";
-export const DEFAULT_HAPP_LSP_ARGS = ["lsp"];
 export type LanguageMode = "happ" | "fallback";
+export { DEFAULT_HAPP_LSP_ARGS };
+export type { HappPreviewTheme, RenderEntityManifestParams, RenderEntityManifestResult };
 
 export interface HappLspStartResult {
   started: boolean;
   fullLanguageSupport: boolean;
   errorMessage?: string;
-}
-
-export interface RenderEntityManifestParams {
-  uri?: string;
-  text?: string;
-  group: string;
-  app: string;
-  env?: string;
-  applyIncludes?: boolean;
-  applyEnvResolution?: boolean;
-}
-
-export interface RenderEntityManifestResult {
-  manifest: string;
-  defaultEnv: string;
-  usedEnv: string;
-  envDiscovery: {
-    literals: string[];
-    regexes: string[];
-  };
-}
-
-export interface HappPreviewTheme {
-  ui: {
-    bg: string;
-    surface: string;
-    surface2: string;
-    surface3: string;
-    surface4: string;
-    text: string;
-    muted: string;
-    accent: string;
-    accent2: string;
-    border: string;
-    danger: string;
-    ok: string;
-    title: string;
-    controlHoverBorder: string;
-    controlFocusBorder: string;
-    controlFocusRing: string;
-    quickEnvBg: string;
-    quickEnvBorder: string;
-    quickEnvText: string;
-    quickEnvHoverBg: string;
-    quickEnvHoverBorder: string;
-  };
-  syntax: {
-    key: string;
-    bool: string;
-    number: string;
-    comment: string;
-    string: string;
-    block: string;
-  };
 }
 
 export class HappLspClient {
@@ -84,7 +39,7 @@ export class HappLspClient {
   async start(
     context: vscode.ExtensionContext,
     happPath: string,
-    args: string[],
+    args: readonly string[],
   ): Promise<HappLspStartResult> {
     const runtimeArgs = withParentPidArg(args);
     this.logger?.appendLine(`[client] start requested command=${happPath} args=${JSON.stringify(runtimeArgs)}`);
@@ -194,13 +149,13 @@ export class HappLspClient {
     if (!active) {
       throw new Error("happ LSP client is not running");
     }
-    if (this.customMethods.size > 0 && !this.customMethods.has("happ/renderEntityManifest")) {
+    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.renderEntityManifest)) {
       this.logger?.appendLine("[client] renderEntityManifest unavailable (method not advertised by server)");
       throw new Error("happ LSP server does not support manifest preview (happ/renderEntityManifest)");
     }
     try {
       const result = await active.sendRequest<RenderEntityManifestResult>(
-        "happ/renderEntityManifest",
+        HAPP_LSP_METHODS.renderEntityManifest,
         {
           uri: params.uri,
           text: params.text,
@@ -224,12 +179,12 @@ export class HappLspClient {
     if (!active) {
       throw new Error("happ LSP client is not running");
     }
-    if (this.customMethods.size > 0 && !this.customMethods.has("happ/getPreviewTheme")) {
+    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.getPreviewTheme)) {
       this.logger?.appendLine("[client] getPreviewTheme unavailable (method not advertised by server)");
       throw new Error("happ LSP server does not support preview theme request (happ/getPreviewTheme)");
     }
     try {
-      const result = await active.sendRequest<HappPreviewTheme>("happ/getPreviewTheme", {});
+      const result = await active.sendRequest<HappPreviewTheme>(HAPP_LSP_METHODS.getPreviewTheme, {});
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -243,26 +198,10 @@ export class HappLspClient {
   }
 }
 
-function withParentPidArg(args: string[]): string[] {
+function withParentPidArg(args: readonly string[]): string[] {
   const hasParentPid = args.some((arg) => arg === "--parent-pid" || arg.startsWith("--parent-pid="));
   if (hasParentPid) {
     return [...args];
   }
   return [...args, `--parent-pid=${process.pid}`];
-}
-
-function collectCustomMethods(experimental: unknown): Set<string> {
-  if (!experimental || typeof experimental !== "object") {
-    return new Set<string>();
-  }
-  const methodsRaw = (experimental as { customMethods?: unknown }).customMethods;
-  if (!Array.isArray(methodsRaw)) {
-    return new Set<string>();
-  }
-  return new Set(
-    methodsRaw
-      .filter((it): it is string => typeof it === "string")
-      .map((it) => it.trim())
-      .filter((it) => it.length > 0),
-  );
 }

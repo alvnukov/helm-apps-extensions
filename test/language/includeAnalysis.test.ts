@@ -35,3 +35,11 @@ test("detects resolved include usage for quoted scalar _include", () => {
   const result = analyzeIncludes(yaml, [{ name: "file-profile" }]);
   assert.equal(result.unresolvedUsages.length, 0);
 });
+
+test("does not treat helper key global._includes._include_from_file as include definition", () => {
+  const yaml = `global:\n  _includes:\n    _include_from_file: include-profiles.yaml\napps-stateless:\n  api:\n    _include:\n      - file-profile\n`;
+  const result = analyzeIncludes(yaml, [{ name: "file-profile" }]);
+
+  assert.equal(result.unresolvedUsages.length, 0);
+  assert.equal(result.definitions.some((d) => d.name === "_include_from_file"), false);
+});

@@ -24,3 +24,14 @@ apps-stateless:
   assert.equal(model.apps[0].app, "api");
   assert.deepEqual(model.apps[0].includes, ["apps-default"]);
 });
+
+test("ignores helper keys inside global._includes", () => {
+  const yaml = `global:
+  _includes:
+    _include_from_file: include-profiles.yaml
+    app-base:
+      enabled: true
+`;
+  const model = buildDependencyGraphModel(yaml);
+  assert.deepEqual(model.includes, ["app-base"]);
+});

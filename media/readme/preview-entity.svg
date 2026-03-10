@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="Entity preview">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect x="24" y="24" width="1232" height="72" rx="14" fill="#1f2937" stroke="#334155"/>
+  <text x="44" y="68" fill="#e5e7eb" font-size="34" font-family="Segoe UI, Arial, sans-serif" font-weight="700">helm-apps preview: apps-stateless.api</text>
+  <rect x="24" y="116" width="590" height="580" rx="14" fill="url(#panel)" stroke="#334155"/>
+  <rect x="642" y="116" width="614" height="580" rx="14" fill="url(#panel)" stroke="#334155"/>
+  <rect x="48" y="144" width="254" height="42" rx="10" fill="#0b1220" stroke="#3b82f6"/>
+  <text x="66" y="171" fill="#bfdbfe" font-size="24" font-family="Segoe UI, Arial, sans-serif">values</text>
+  <rect x="312" y="144" width="278" height="42" rx="10" fill="#111827" stroke="#475569"/>
+  <text x="330" y="171" fill="#94a3b8" font-size="24" font-family="Segoe UI, Arial, sans-serif">manifest</text>
+  <text x="48" y="228" fill="#f59e0b" font-size="22" font-family="JetBrains Mono, Consolas, monospace" font-weight="700">global:</text>
+  <text x="80" y="260" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">env: prod</text>
+  <text x="48" y="300" fill="#f59e0b" font-size="22" font-family="JetBrains Mono, Consolas, monospace" font-weight="700">apps-stateless:</text>
+  <text x="80" y="332" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">api:</text>
+  <text x="112" y="364" fill="#86efac" font-size="22" font-family="JetBrains Mono, Consolas, monospace">enabled: true</text>
+  <text x="112" y="396" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">containers:</text>
+  <text x="144" y="428" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">main:</text>
+  <text x="176" y="460" fill="#93c5fd" font-size="22" font-family="JetBrains Mono, Consolas, monospace">image: nginx</text>
+  <text x="670" y="168" fill="#cbd5e1" font-size="26" font-family="Segoe UI, Arial, sans-serif" font-weight="600">Kubernetes manifest preview</text>
+  <text x="670" y="222" fill="#f59e0b" font-size="22" font-family="JetBrains Mono, Consolas, monospace">kind:</text>
+  <text x="742" y="222" fill="#e5e7eb" font-size="22" font-family="JetBrains Mono, Consolas, monospace">Deployment</text>
+  <text x="670" y="258" fill="#f59e0b" font-size="22" font-family="JetBrains Mono, Consolas, monospace">metadata:</text>
+  <text x="702" y="290" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">name: api</text>
+  <text x="670" y="326" fill="#f59e0b" font-size="22" font-family="JetBrains Mono, Consolas, monospace">spec:</text>
+  <text x="702" y="358" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">replicas: 2</text>
+  <text x="702" y="390" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">template:</text>
+  <text x="734" y="422" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">containers:</text>
+  <text x="766" y="454" fill="#cbd5e1" font-size="22" font-family="JetBrains Mono, Consolas, monospace">- name: api</text>
+  <text x="766" y="486" fill="#93c5fd" font-size="22" font-family="JetBrains Mono, Consolas, monospace">image: nginx:latest</text>
+</svg>

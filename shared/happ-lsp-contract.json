@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "transport": "stdio-jsonrpc",
+  "entrypoint": {
+    "command": "happ",
+    "args": [
+      "lsp"
+    ],
+    "parentPidArg": "--parent-pid=<pid>"
+  },
+  "methods": {
+    "resolveEntity": "happ/resolveEntity",
+    "renderEntityManifest": "happ/renderEntityManifest",
+    "getPreviewTheme": "happ/getPreviewTheme"
+  },
+  "renderEntityManifest": {
+    "request": {
+      "uri": "string?",
+      "text": "string?",
+      "group": "string",
+      "app": "string",
+      "env": "string?",
+      "applyIncludes": "boolean?",
+      "applyEnvResolution": "boolean?"
+    },
+    "response": {
+      "manifest": "string",
+      "defaultEnv": "string",
+      "usedEnv": "string",
+      "envDiscovery": {
+        "literals": "string[]",
+        "regexes": "string[]"
+      }
+    }
+  }
+}

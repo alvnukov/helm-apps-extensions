@@ -22,6 +22,8 @@ interface KeyInfo extends TextRange {
   value: string;
 }
 
+const INCLUDE_ENTRY_HELPER_KEYS = new Set(["_include", "_include_from_file", "_include_files"]);
+
 export function findSymbolAtPosition(text: string, line: number, character: number): SymbolRef | null {
   const lines = text.split(/\r?\n/);
   const lineText = lines[line] ?? "";
@@ -182,6 +184,9 @@ function parseScalarIncludeToken(value: string, valueStart: number): IncludeToke
 }
 
 function isIncludeDefinitionLine(lines: string[], line: number, key: KeyInfo): boolean {
+  if (isIncludeEntryHelperKey(key.key)) {
+    return false;
+  }
   if (key.indent !== 4) {
     return false;
   }
@@ -191,6 +196,10 @@ function isIncludeDefinitionLine(lines: string[], line: number, key: KeyInfo): b
   }
   const top = findParentKey(lines, parent.line, parent.indent);
   return top?.indent === 0 && top.key === "global";
+}
+
+function isIncludeEntryHelperKey(name: string): boolean {
+  return INCLUDE_ENTRY_HELPER_KEYS.has(name);
 }
 
 function isAppDefinitionLine(lines: string[], line: number, key: KeyInfo): boolean {
