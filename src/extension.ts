@@ -4664,7 +4664,7 @@ function renderPreviewHtml(
     ...regexEnvOptions.map((r) => r.sample),
   ])];
   const knownEnvSelect = knownEnvs.length > 0
-    ? `<label>known env:
+    ? `<label>known env
         <select id="envSelect">
           <option value="">custom...</option>
           ${
@@ -4676,7 +4676,7 @@ function renderPreviewHtml(
       </label>`
     : "";
   const details = (envDiscovery.regexes.length > 0 || missingFiles.length > 0)
-    ? `<details>
+    ? `<details class="details-panel">
         <summary>Details</summary>
         ${
           envDiscovery.regexes.length > 0
@@ -4689,7 +4689,7 @@ function renderPreviewHtml(
             : ""
         }
       </details>`
-    : "";
+      : "";
   const renderModeValuesActive = options.renderMode === "values" ? "active" : "";
   const renderModeManifestActive = options.renderMode === "manifest" ? "active" : "";
   const renderModeValuesSelected = options.renderMode === "values" ? "true" : "false";
@@ -4721,40 +4721,70 @@ function renderPreviewHtml(
         --border: ${ui.border};
         --danger: ${ui.danger};
         --ok: ${ui.ok};
+        --shadow-soft: 0 10px 24px rgba(0, 0, 0, 0.18);
+        --shadow-pop: 0 14px 32px rgba(0, 0, 0, 0.28);
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        padding: 12px;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 16px;
+        font-family: "IBM Plex Sans", "Inter Tight", "Segoe UI", sans-serif;
         background: var(--bg);
         color: var(--text);
       }
+      .preview-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
       h2 {
-        margin: 0 0 12px;
-        font-size: 42px;
-        line-height: 1.04;
-        letter-spacing: -0.03em;
-        font-weight: 800;
+        margin: 0;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.06;
+        letter-spacing: -0.025em;
+        font-weight: 760;
         color: ${ui.title};
       }
+      .sub {
+        font-size: 12px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
       .bar {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-bottom: 10px;
-        padding: 10px;
+        display: grid;
+        grid-template-columns: minmax(260px, 1.3fr) minmax(180px, 1fr) minmax(180px, 1fr) minmax(160px, .9fr);
+        gap: 10px;
+        align-items: end;
+        padding: 14px;
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 14px;
+        box-shadow: var(--shadow-soft);
       }
-      label { font-size: 12px; }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        min-width: 0;
+      }
       input[type="text"] {
-        min-width: 240px;
+        min-width: 0;
+        width: 100%;
         border: 1px solid var(--border);
         border-radius: 10px;
-        padding: 8px 10px;
+        padding: 9px 12px;
         background: var(--surface);
         color: var(--text);
         transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
@@ -4766,10 +4796,11 @@ function renderPreviewHtml(
         box-shadow: 0 0 0 2px ${ui.controlFocusRing};
       }
       select {
-        min-width: 150px;
+        min-width: 0;
+        width: 100%;
         border: 1px solid var(--border);
         border-radius: 10px;
-        padding: 8px 10px;
+        padding: 9px 12px;
         background: var(--surface);
         color: var(--text);
         transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
@@ -4781,15 +4812,23 @@ function renderPreviewHtml(
         box-shadow: 0 0 0 2px ${ui.controlFocusRing};
       }
       input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
-      .entity-control { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+      .entity-control {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        min-width: 0;
+      }
       .entity-trigger {
-        min-width: 300px;
+        min-width: 0;
+        width: 100%;
         border: 1px solid var(--border);
         background: var(--surface);
         color: var(--text);
         border-radius: 10px;
-        padding: 8px 12px;
-        height: 36px;
+        padding: 9px 12px;
+        min-height: 38px;
         text-align: left;
         cursor: pointer;
         transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
@@ -4809,7 +4848,7 @@ function renderPreviewHtml(
         background: var(--surface-2);
         border: 1px solid var(--border);
         border-radius: 9px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+        box-shadow: var(--shadow-pop);
         padding: 3px;
         min-width: 260px;
       }
@@ -4828,7 +4867,7 @@ function renderPreviewHtml(
         background: var(--surface-2);
         border: 1px solid var(--border);
         border-radius: 9px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+        box-shadow: var(--shadow-pop);
         padding: 3px;
       }
       .entity-item {
@@ -4872,10 +4911,12 @@ function renderPreviewHtml(
         border-right: 1px solid var(--border);
         background: var(--surface-2);
         color: var(--muted);
-        padding: 8px 12px;
+        padding: 10px 12px;
         cursor: pointer;
         font-family: inherit;
-        font-size: 13px;
+        font-size: 12px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
         text-align: center;
         position: relative;
         transition: background-color .16s ease, color .16s ease;
@@ -4885,7 +4926,7 @@ function renderPreviewHtml(
       .mode-tab.active {
         background: var(--surface);
         color: ${ui.title};
-        font-weight: 600;
+        font-weight: 700;
         box-shadow: inset 1px 0 0 var(--border), inset -1px 0 0 var(--border);
       }
       .mode-tab.active:first-child { border-top-left-radius: 6px; }
@@ -4923,11 +4964,11 @@ function renderPreviewHtml(
       }
       .diff-item { font-size: 12px; margin-bottom: 4px; }
       .render-shell {
-        margin-top: 10px;
         border: 1px solid var(--border);
-        border-radius: 8px;
+        border-radius: 14px;
         background: var(--surface);
         overflow: hidden;
+        box-shadow: var(--shadow-soft);
       }
       .render {
         margin-top: 0;
@@ -4935,11 +4976,11 @@ function renderPreviewHtml(
         border-radius: 0;
         background: var(--surface);
         overflow: auto;
-        max-height: calc(100vh - 260px);
+        max-height: calc(100vh - 292px);
       }
       pre {
         margin: 0;
-        padding: 14px;
+        padding: 16px;
         color: var(--text);
         font-family: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
         font-size: 12px;
@@ -4952,45 +4993,69 @@ function renderPreviewHtml(
       .y-comment { color: ${syntax.comment}; font-style: italic; }
       .y-string { color: ${syntax.string}; }
       .y-block { color: ${syntax.block}; font-weight: 600; }
-      details { margin-bottom: 10px; }
+      details {
+        margin: 0;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface-2);
+        padding: 8px 10px;
+      }
       summary { cursor: pointer; font-size: 12px; user-select: none; color: var(--text); }
-      @media (max-width: 700px) {
+      .details-panel summary {
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      @media (max-width: 1024px) {
+        .bar {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 720px) {
+        body { padding: 12px; }
+        .bar { grid-template-columns: 1fr; }
         .entity-control { width: 100%; }
-        .entity-trigger { min-width: 0; width: 100%; }
+        .entity-trigger { width: 100%; }
+        .render { max-height: calc(100vh - 320px); }
       }
     </style>
   </head>
   <body>
-    <h2>${safeTitle}</h2>
-    <div class="bar">
-      <div class="entity-control">
-        <label for="entityTrigger">entity:</label>
-        <button id="entityTrigger" type="button" class="entity-trigger" ${entityDisabled}>${escapeHtml(entityLabel)}</button>
-        <div id="entityPopup" class="entity-popup" hidden>
-          <div id="groupMenu" class="entity-menu"></div>
-          <div id="appMenu" class="entity-submenu" hidden></div>
+    <div class="preview-shell">
+      <div class="header">
+        <h2>${safeTitle}</h2>
+        <div class="sub">resolved preview</div>
+      </div>
+      <div class="bar">
+        <div class="entity-control">
+          <label for="entityTrigger">entity</label>
+          <button id="entityTrigger" type="button" class="entity-trigger" ${entityDisabled}>${escapeHtml(entityLabel)}</button>
+          <div id="entityPopup" class="entity-popup" hidden>
+            <div id="groupMenu" class="entity-menu"></div>
+            <div id="appMenu" class="entity-submenu" hidden></div>
+          </div>
         </div>
+        <label>env
+          <input id="envInput" type="text" value="${escapeHtml(options.env)}" />
+        </label>
+        ${knownEnvSelect}
+        <label>manifest via
+          <select id="manifestBackendSelect">
+            <option value="fast" ${manifestBackendFastSelected}>fast (happ)</option>
+            <option value="helm" ${manifestBackendHelmSelected}>helm</option>
+            <option value="werf" ${manifestBackendWerfSelected}>werf</option>
+          </select>
+        </label>
       </div>
-      <label>env:
-        <input id="envInput" type="text" value="${escapeHtml(options.env)}" />
-      </label>
-      ${knownEnvSelect}
-      <label>manifest via:
-        <select id="manifestBackendSelect">
-          <option value="fast" ${manifestBackendFastSelected}>fast (happ)</option>
-          <option value="helm" ${manifestBackendHelmSelected}>helm</option>
-          <option value="werf" ${manifestBackendWerfSelected}>werf</option>
-        </select>
-      </label>
-    </div>
-    <div class="render-shell">
-      <div class="mode-tabs" role="tablist" aria-label="render mode">
-        <button id="renderModeValues" type="button" class="mode-tab ${renderModeValuesActive}" data-mode="values" role="tab" aria-selected="${renderModeValuesSelected}">values</button>
-        <button id="renderModeManifest" type="button" class="mode-tab ${renderModeManifestActive}" data-mode="manifest" role="tab" aria-selected="${renderModeManifestSelected}">manifest</button>
+      <div class="render-shell">
+        <div class="mode-tabs" role="tablist" aria-label="render mode">
+          <button id="renderModeValues" type="button" class="mode-tab ${renderModeValuesActive}" data-mode="values" role="tab" aria-selected="${renderModeValuesSelected}">values</button>
+          <button id="renderModeManifest" type="button" class="mode-tab ${renderModeManifestActive}" data-mode="manifest" role="tab" aria-selected="${renderModeManifestSelected}">manifest</button>
+        </div>
+        <div class="render"><pre id="yamlPreview">${renderYamlHighlightedHtml(yamlText)}</pre></div>
       </div>
-      <div class="render"><pre id="yamlPreview">${renderYamlHighlightedHtml(yamlText)}</pre></div>
+      ${details}
     </div>
-    ${details}
     <script>
       const vscode = acquireVsCodeApi();
       const options = ${optionsJson};
