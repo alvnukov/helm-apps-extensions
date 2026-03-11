@@ -2185,7 +2185,7 @@ const RULES: DocRule[] = [
       ],
       notesRu: [
         "Цепочки конкатенируются в указанном порядке.",
-        "Локальные поля переопределяют значения из include.",
+        "Локальные поля переопределяют значения из include-профилей.",
       ],
       example: "apps-stateless:\n  api:\n    _include: [apps-default]\n",
     },
@@ -2194,7 +2194,7 @@ const RULES: DocRule[] = [
     pattern: ["*", "*", "_include_from_file"],
     doc: {
       title: "Inline Include From File",
-      titleRu: "Inline include из файла",
+      titleRu: "_include из файла",
       summary: "Loads YAML map from file and merges it into current object.",
       summaryRu: "Загружает YAML map из файла и мержит его в текущий объект.",
       type: "string",
@@ -2220,12 +2220,12 @@ const RULES: DocRule[] = [
       type: "string[]",
       docsLink: "docs/reference-values.md#param-include-files",
       notes: [
-        "Each file becomes profile named by filename.",
+        "Each file becomes profile named by SHA256 of the raw file path string.",
         "Supports navigation/hover to include definition.",
       ],
       notesRu: [
-        "Каждый файл становится профилем с именем по файлу.",
-        "Поддерживается переход/hover к определению include.",
+        "Каждый файл становится профилем с именем SHA256 от исходной строки пути.",
+        "Поддерживается переход/подсказка к определению include-профиля.",
       ],
       example: "_include_files:\n  - defaults.yaml\n  - profile-prod.yaml\n",
     },
@@ -3500,13 +3500,13 @@ const LAST_KEY_RULES: Record<string, FieldDoc> = {
     ],
     notesRu: [
       "Цепочки конкатенируются в указанном порядке.",
-      "Локальные поля переопределяют значения из include.",
+      "Локальные поля переопределяют значения из include-профилей.",
     ],
     example: "_include: [apps-default]\n",
   },
   _include_from_file: {
     title: "Inline Include From File",
-    titleRu: "Inline include из файла",
+    titleRu: "_include из файла",
     summary: "Loads YAML map from file and merges it into current object.",
     summaryRu: "Загружает YAML map из файла и мержит его в текущий объект.",
     type: "string",
@@ -3529,12 +3529,12 @@ const LAST_KEY_RULES: Record<string, FieldDoc> = {
     type: "string[]",
     docsLink: "docs/reference-values.md#param-include-files",
     notes: [
-      "Each file becomes profile named by filename.",
+      "Each file becomes profile named by SHA256 of the raw file path string.",
       "Supports navigation/hover to include definition.",
     ],
     notesRu: [
-      "Каждый файл становится профилем с именем по файлу.",
-      "Поддерживается переход/hover к определению include.",
+      "Каждый файл становится профилем с именем SHA256 от исходной строки пути.",
+      "Поддерживается переход/подсказка к определению include-профиля.",
     ],
     example: "_include_files:\n  - defaults.yaml\n  - profile-prod.yaml\n",
   },
@@ -5328,6 +5328,12 @@ export function findKeyPathAtPosition(text: string, line: number, character: num
 }
 
 export function findFieldDoc(path: string[], context?: FieldDocLookupContext): FieldDoc | null {
+  if (path.length === 3 && path[0] === "global" && path[1] === "_includes") {
+    const helperDoc = LAST_KEY_RULES[path[2] ?? ""];
+    if (helperDoc && (path[2] === "_include" || path[2] === "_include_from_file" || path[2] === "_include_files")) {
+      return specializeDocForPath(path, helperDoc);
+    }
+  }
   const candidatePaths = buildCandidateDocPaths(path, context);
   for (const candidate of candidatePaths) {
     for (const rule of RULES) {
@@ -5928,7 +5934,7 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
         title: "Include Profile Entry",
         titleRu: "Элемент include-профиля",
         summary: `Reusable profile \`${profileName}\` merged via app/group \`_include\`.`,
-        summaryRu: `Переиспользуемый профиль \`${profileName}\`, который мержится через app/group \`_include\`.`,
+        summaryRu: `Переиспользуемый include-профиль \`${profileName}\`, который мержится через app/group \`_include\`.`,
         type: "map",
         docsLink: "docs/reference-values.md#param-global-includes",
         notes: [
@@ -5951,8 +5957,8 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
         ? `\`${key}\` is part of include profile \`${profileName}\` payload.`
         : `\`${key}\` is custom payload inside include profile \`${profileName}\`.`,
       summaryRu: knownRoot
-        ? `\`${key}\` является частью payload include-профиля \`${profileName}\`.`
-        : `\`${key}\` — кастомный payload внутри include-профиля \`${profileName}\`.`,
+        ? `\`${key}\` является частью содержимого include-профиля \`${profileName}\`.`
+        : `\`${key}\` — кастомное поле внутри include-профиля \`${profileName}\`.`,
       type: knownRoot ? "profile field" : "custom profile field",
       notes: [
         "Include profile fields are merged into target app/group by `_include`.",

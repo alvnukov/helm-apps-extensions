@@ -35,6 +35,7 @@ export function validateUnexpectedNativeLists(text: string, options: ValidationO
     }
 
     const indent = countIndent(raw);
+    const isListItem = /^\s*-\s+/.test(raw);
 
     if (blockScalarIndent !== null) {
       if (indent > blockScalarIndent) {
@@ -43,7 +44,13 @@ export function validateUnexpectedNativeLists(text: string, options: ValidationO
       blockScalarIndent = null;
     }
 
-    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+    // YAML allows list items to be aligned with parent key:
+    // key:
+    // - item
+    // In that form we must keep the parent key in stack for path resolution.
+    while (stack.length > 0 && (isListItem
+      ? stack[stack.length - 1].indent > indent
+      : stack[stack.length - 1].indent >= indent)) {
       stack.pop();
     }
 
@@ -59,7 +66,7 @@ export function validateUnexpectedNativeLists(text: string, options: ValidationO
       continue;
     }
 
-    if (/^\s*-\s+/.test(raw)) {
+    if (isListItem) {
       const path = toValuesPath(stack.map((s) => s.key));
       const key = stack.length > 0 ? stack[stack.length - 1].key : "";
       const parentKey = stack.length > 1 ? stack[stack.length - 2].key : "";

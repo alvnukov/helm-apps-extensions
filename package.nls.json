@@ -35,6 +35,7 @@
   "cfg.libraryGithubCachedChartPath.description": "Extension-managed cached helm-apps chart path downloaded from repository.",
   "cfg.libraryGithubCachedVersion.description": "Version of cached helm-apps chart downloaded from repository.",
   "cfg.helmPath.description": "Path to helm binary used for dependency/lock commands.",
+  "cfg.previewManifestBackend.description": "Default manifest preview backend: fast (happ LSP), helm template, or werf render.",
   "submenu.insertEntityTemplate.label": "Insert Entity Template",
   "cmd.insertEntityTemplate.appsStateless.title": "apps-stateless",
   "cmd.insertEntityTemplate.appsStateful.title": "apps-stateful",

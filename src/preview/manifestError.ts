@@ -3,6 +3,7 @@ type ManifestPreviewErrorContext = {
   group?: string;
   app?: string;
   env?: string;
+  renderer?: string;
 };
 
 type ParsedManifestError = {
@@ -23,6 +24,7 @@ export function formatManifestPreviewError(
   context: ManifestPreviewErrorContext,
 ): string {
   const parsed = parseManifestPreviewError(extractErrorMessage(err));
+  const nextSteps = buildNextSteps(parsed, context);
   const lines: string[] = [
     "# manifest preview failed",
     "# happ could not render Kubernetes manifests for this entity.",
@@ -58,8 +60,7 @@ export function formatManifestPreviewError(
   lines.push(
     "",
     "nextSteps:",
-    "  - Check the `path` field and update the value format.",
-    "  - Re-check `hint` and `docs`, then rerender manifest preview.",
+    ...nextSteps.map((step) => `  - ${step}`),
     "",
     "rawError: |-",
     ...toYamlBlock(parsed.raw),
@@ -131,7 +132,41 @@ function buildContextLines(context: ManifestPreviewErrorContext): string[] {
   if (context.fileUri) {
     lines.push(`fileUri: ${yamlScalar(context.fileUri)}`);
   }
+  if (context.renderer) {
+    lines.push(`renderer: ${yamlScalar(context.renderer)}`);
+  }
   return lines;
+}
+
+function buildNextSteps(
+  parsed: ParsedManifestError,
+  context: ManifestPreviewErrorContext,
+): string[] {
+  const raw = parsed.raw.toLowerCase();
+  if (
+    context.renderer === "werf"
+    && raw.includes("required encryption key not found")
+  ) {
+    return [
+      "Set `WERF_SECRET_KEY` in VS Code process env or create `.werf_secret_key`/`~/.werf/global_secret_key`.",
+      "Reload extension host and rerender manifest preview.",
+    ];
+  }
+  if (raw.includes("nil is not a command")) {
+    return [
+      "Inspect template chain around `apps-compat.resolveRawJson`: one of rendered values resolves to `nil` in current context.",
+      "Run equivalent CLI render with `--debug` for this entity/env and compare missing values versus CI inputs.",
+    ];
+  }
+  if (parsed.path || parsed.hint || parsed.docs) {
+    return [
+      "Check the `path` field and update the value format.",
+      "Re-check `hint` and `docs`, then rerender manifest preview.",
+    ];
+  }
+  return [
+    "Review `rawError` details and rerender preview after fixing values/templates.",
+  ];
 }
 
 function extractErrorMessage(err: unknown): string {

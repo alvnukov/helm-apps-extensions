@@ -2,7 +2,7 @@
   "name": "helm-apps",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "alvnukov",
   "license": "Apache-2.0",
   "repository": {
@@ -492,6 +492,16 @@
           "type": "string",
           "default": "helm",
           "description": "%cfg.helmPath.description%"
+        },
+        "helm-apps.previewManifestBackend": {
+          "type": "string",
+          "enum": [
+            "fast",
+            "helm",
+            "werf"
+          ],
+          "default": "fast",
+          "description": "%cfg.previewManifestBackend.description%"
         }
       }
     }

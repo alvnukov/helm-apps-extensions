@@ -119,6 +119,8 @@
   Явный путь к бинарнику `happ`, если он не находится через `PATH`.
 - `helm-apps.happLspArgs`  
   Аргументы запуска LSP (`["lsp"]` по умолчанию).
+- `helm-apps.previewManifestBackend`  
+  Backend по умолчанию для manifest preview: `fast` (`happ`), `helm`, `werf`.
 - `helm-apps.schemaFileMatch`  
   Маски файлов, для которых подключается schema.
 - `helm-apps.disableYamlSchemaHover`  

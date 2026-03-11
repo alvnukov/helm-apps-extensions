@@ -1,7 +1,9 @@
 export const HAPP_LSP_METHODS = {
+  listEntities: "happ/listEntities",
   resolveEntity: "happ/resolveEntity",
   renderEntityManifest: "happ/renderEntityManifest",
   getPreviewTheme: "happ/getPreviewTheme",
+  templateAssist: "happ/templateAssist",
 } as const;
 
 export const DEFAULT_HAPP_LSP_ARGS = ["lsp"];
@@ -21,11 +23,69 @@ export interface EnvironmentDiscoveryModel {
   regexes: string[];
 }
 
+export interface ListEntitiesParams {
+  uri?: string;
+  text?: string;
+  env?: string;
+  applyIncludes?: boolean;
+  applyEnvResolution?: boolean;
+}
+
+export interface PreviewEntityGroupModel {
+  name: string;
+  apps: string[];
+}
+
+export interface ListEntitiesResult {
+  groups: PreviewEntityGroupModel[];
+  defaultEnv: string;
+  usedEnv: string;
+  envDiscovery: EnvironmentDiscoveryModel;
+}
+
+export interface ResolveEntityParams {
+  uri?: string;
+  text?: string;
+  group: string;
+  app: string;
+  env?: string;
+  applyIncludes?: boolean;
+  applyEnvResolution?: boolean;
+}
+
+export interface ResolveEntityResult {
+  entity: unknown;
+  defaultEnv: string;
+  usedEnv: string;
+  envDiscovery: EnvironmentDiscoveryModel;
+}
+
 export interface RenderEntityManifestResult {
   manifest: string;
   defaultEnv: string;
   usedEnv: string;
   envDiscovery: EnvironmentDiscoveryModel;
+}
+
+export interface TemplateAssistParams {
+  uri?: string;
+  text?: string;
+  line: number;
+  character: number;
+}
+
+export interface TemplateAssistCompletion {
+  label: string;
+  insertText: string;
+  detail: string;
+  kind: string;
+  replaceStart: number;
+  replaceEnd: number;
+}
+
+export interface TemplateAssistResult {
+  insideTemplate: boolean;
+  completions: TemplateAssistCompletion[];
 }
 
 export interface HappPreviewTheme {

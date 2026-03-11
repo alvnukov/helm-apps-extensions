@@ -1,4 +1,5 @@
-import { dirname, extname, isAbsolute, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 import * as YAML from "yaml";
 
@@ -20,6 +21,8 @@ export interface MissingIncludeFile {
 }
 
 export type ReadFileFn = (filePath: string) => Promise<string>;
+
+const INCLUDE_ENTRY_HELPER_KEYS = new Set(["_include", "_include_from_file", "_include_files"]);
 
 export async function expandValuesWithFileIncludes(
   values: Record<string, unknown>,
@@ -57,7 +60,7 @@ export async function expandValuesWithFileIncludes(
 
 async function processNode(
   node: unknown,
-  baseDir: string,
+  includeBaseDir: string,
   pathSegments: string[],
   includeDefinitions: IncludeDefinition[],
   injectedIncludes: Record<string, unknown>,
@@ -66,11 +69,7 @@ async function processNode(
   fileStack: Set<string>,
 ): Promise<unknown> {
   if (Array.isArray(node)) {
-    const out: unknown[] = [];
-    for (const item of node) {
-      out.push(await processNode(item, baseDir, pathSegments, includeDefinitions, injectedIncludes, missingFiles, readFile, fileStack));
-    }
-    return out;
+    return clone(node);
   }
   if (!isMap(node)) {
     return node;
@@ -80,56 +79,36 @@ async function processNode(
 
   if (typeof current._include_from_file === "string" && current._include_from_file.trim().length > 0) {
     const includeRawPath = current._include_from_file.trim();
-    const loadedResult = await loadYamlMapFromFile(includeRawPath, baseDir, missingFiles, readFile, fileStack);
+    const loadedResult = await loadYamlMapFromFile(includeRawPath, includeBaseDir, missingFiles, readFile, fileStack);
     delete current._include_from_file;
     if (loadedResult) {
       const includePath = loadedResult.filePath;
-      const loaded = loadedResult.content;
-      const loadedProcessed = (await processNode(
-        loaded,
-        dirname(includePath),
-        pathSegments,
-        includeDefinitions,
-        injectedIncludes,
-        missingFiles,
-        readFile,
-        fileStack,
-      )) as Record<string, unknown>;
+      const includePayload = isGlobalIncludesPath(pathSegments)
+        ? normalizeGlobalIncludesPayload(loadedResult.content)
+        : loadedResult.content;
       if (isGlobalIncludesPath(pathSegments)) {
-        for (const includeName of Object.keys(loadedProcessed)) {
+        for (const includeName of Object.keys(includePayload)) {
+          if (isIncludeEntryHelperKey(includeName)) {
+            continue;
+          }
           includeDefinitions.push({ name: includeName, filePath: includePath, line: 0 });
         }
       }
 
-      current = mergeMaps(loadedProcessed, current);
+      current = mergeMaps(includePayload, current);
     }
   }
 
-  if (Array.isArray(current._include_files)) {
+  if (Object.prototype.hasOwnProperty.call(current, "_include_files")) {
+    const includeFiles = normalizeIncludeFiles(current._include_files);
     const includeNames: string[] = [];
-    for (const rawPath of current._include_files) {
-      if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
-        continue;
-      }
-      const includeRawPath = rawPath.trim();
-      const includeName = includeNameFromPath(rawPath);
+    for (const includeRawPath of includeFiles) {
+      const includeName = includeNameFromPath(includeRawPath);
 
-      const loadedResult = await loadYamlMapFromFile(includeRawPath, baseDir, missingFiles, readFile, fileStack);
+      const loadedResult = await loadYamlMapFromFile(includeRawPath, includeBaseDir, missingFiles, readFile, fileStack);
       if (loadedResult) {
         const includePath = loadedResult.filePath;
-        const loaded = loadedResult.content;
-        const loadedProcessed = (await processNode(
-          loaded,
-          dirname(includePath),
-          pathSegments,
-          includeDefinitions,
-          injectedIncludes,
-          missingFiles,
-          readFile,
-          fileStack,
-        )) as Record<string, unknown>;
-
-        injectedIncludes[includeName] = loadedProcessed;
+        injectedIncludes[includeName] = loadedResult.content;
         includeDefinitions.push({ name: includeName, filePath: includePath, line: 0 });
         includeNames.push(includeName);
       }
@@ -141,7 +120,10 @@ async function processNode(
   }
 
   for (const [k, v] of Object.entries(current)) {
-    current[k] = await processNode(v, baseDir, [...pathSegments, k], includeDefinitions, injectedIncludes, missingFiles, readFile, fileStack);
+    if (!isMap(v)) {
+      continue;
+    }
+    current[k] = await processNode(v, includeBaseDir, [...pathSegments, k], includeDefinitions, injectedIncludes, missingFiles, readFile, fileStack);
   }
 
   return current;
@@ -224,12 +206,8 @@ function isNotFoundError(err: unknown): boolean {
 }
 
 function includeNameFromPath(pathValue: string): string {
-  const normalized = pathValue.trim().split("/").pop() ?? pathValue.trim();
-  const ext = extname(normalized).toLowerCase();
-  if (ext === ".yaml" || ext === ".yml") {
-    return normalized.slice(0, normalized.length - ext.length);
-  }
-  return normalized;
+  const normalized = pathValue.trim();
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 function isTemplatedPath(pathValue: string): boolean {
@@ -238,6 +216,15 @@ function isTemplatedPath(pathValue: string): boolean {
 
 function isGlobalIncludesPath(pathSegments: string[]): boolean {
   return pathSegments.length === 2 && pathSegments[0] === "global" && pathSegments[1] === "_includes";
+}
+
+function normalizeGlobalIncludesPayload(loaded: Record<string, unknown>): Record<string, unknown> {
+  const globalMap = toMap(loaded.global);
+  const includesMap = toMap(globalMap?._includes);
+  if (includesMap) {
+    return clone(includesMap);
+  }
+  return loaded;
 }
 
 function ensureGlobalIncludes(root: Record<string, unknown>): void {
@@ -260,8 +247,26 @@ function normalizeInclude(value: unknown): string[] {
   return [];
 }
 
+function normalizeIncludeFiles(value: unknown): string[] {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return [value.trim()];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
+  }
+  return [];
+}
+
+function isIncludeEntryHelperKey(name: string): boolean {
+  return INCLUDE_ENTRY_HELPER_KEYS.has(name);
+}
+
 function isMap(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toMap(value: unknown): Record<string, unknown> | null {
+  return isMap(value) ? value : null;
 }
 
 function mergeMaps(base: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {

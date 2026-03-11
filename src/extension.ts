@@ -11,12 +11,16 @@ import * as YAML from "yaml";
 import { buildFieldDocMarkdownLocalized, findFieldDoc, findKeyPathAtPosition } from "./hover/fieldHover";
 import { buildHelmCommandCandidates } from "./library/helmRunner";
 import { compareSemver, resolveHelmRepositoryURL } from "./library/repository";
-import { extractLocalIncludeBlock, trimPreview } from "./hover/includeHover";
+import { extractIncludeProfileBlock, extractLocalIncludeBlock, trimPreview } from "./hover/includeHover";
 import { buildDependencyGraphModel } from "./language/dependencyGraph";
 import { buildHelmAppsDocumentSymbols } from "./language/documentSymbols";
 import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "./language/symbols";
-import { discoverEnvironments, findAppScopeAtLine, resolveEntityWithIncludes, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
-import { forceEntityEnabled, withManifestRenderEntityEnabled } from "./preview/entityRenderOverrides";
+import { discoverEnvironments, findAppScopeAtLine, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
+import {
+  buildManifestEntityIsolationSetValues,
+  forceEntityEnabled,
+  withManifestRenderEntityEnabled,
+} from "./preview/entityRenderOverrides";
 import { formatManifestPreviewError } from "./preview/manifestError";
 import { expandValuesWithFileIncludes, type IncludeDefinition } from "./loader/fileIncludes";
 import { extractAppChildToGlobalInclude, safeRenameAppKey } from "./refactor/appRefactor";
@@ -53,12 +57,16 @@ const manifestPreviewInFlight = new Set<string>();
 const MANIFEST_PREVIEW_CACHE_LIMIT = 24;
 let completionSchemaCache: JsonSchema | null = null;
 const chartDetectionCache = new Map<string, boolean>();
+const includeFilesByChartCache = new Map<string, { scannedAt: number; files: Set<string> }>();
+const includeOwnersByChartCache = new Map<string, { scannedAt: number; owners: Map<string, Set<string>> }>();
 const HELM_APPS_DEP_NAME = "helm-apps";
 const happLspBootstrapOutput = vscode.window.createOutputChannel("helm-apps / happ-lsp bootstrap");
 const happLspClient = new HappLspClient(happLspBootstrapOutput);
 const listPolicyDiagnostics = vscode.languages.createDiagnosticCollection("helm-apps-list-policy");
 let previewThemeCache: HappPreviewTheme | null = null;
 let previewThemeFetchFailed = false;
+let templateAssistUnavailable = false;
+const INCLUDE_FILE_CACHE_TTL_MS = 2000;
 
 type JsonSchema = {
   $ref?: string;
@@ -81,7 +89,12 @@ interface PreviewOptions {
   applyEnvResolution: boolean;
   showDiff: boolean;
   renderMode: "values" | "manifest";
+  manifestBackend: ManifestPreviewBackend;
 }
+
+type ManifestPreviewBackend = "fast" | "helm" | "werf";
+
+const MANIFEST_PREVIEW_BACKENDS: readonly ManifestPreviewBackend[] = ["fast", "helm", "werf"];
 
 type EnvironmentDiscoveryModel = { literals: string[]; regexes: string[] };
 
@@ -312,13 +325,14 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider({ language: "yaml" }, {
-      provideCompletionItems: async (document, position) => await provideCompletionItems(document, position),
-    }, " ", ":", "-"),
+      provideCompletionItems: async (document, position, _token, completionContext) =>
+        await provideCompletionItems(document, position, completionContext),
+    }, " ", ":", "-", ".", "$"),
   );
   context.subscriptions.push(
     vscode.languages.registerDocumentSymbolProvider({ language: "yaml" }, {
       provideDocumentSymbols: async (document) => {
-        if (!(await isHelmAppsValuesDocument(document))) {
+        if (!(await isHelmAppsLanguageDocument(document))) {
           return [];
         }
         return buildHelmAppsDocumentSymbols(document);
@@ -353,7 +367,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const localDef = await provideIncludeDefinition(editor.document, editor.selection.active);
       if (!localDef) {
-        void vscode.window.showWarningMessage(t("No include definition found under cursor", "Под курсором не найдено определение include"));
+        void vscode.window.showWarningMessage(t("No include definition found under cursor", "Под курсором не найдено определение include-профиля"));
         return;
       }
       const location = Array.isArray(localDef) ? localDef[0] : localDef;
@@ -442,7 +456,15 @@ export function activate(context: vscode.ExtensionContext): void {
         const values = loaded.values;
         const text = editor.document.getText();
         const scope = findAppScopeAtLine(text, editor.selection.active.line);
-        const menu = buildPreviewEntityMenuModel(values, scope?.group ?? "", scope?.app ?? "");
+        const context = await resolvePreviewMenuAndEnv(
+          editor.document,
+          text,
+          values,
+          scope?.group ?? "",
+          scope?.app ?? "",
+          "",
+        );
+        const menu = context.menuModel;
         if (menu.groups.length === 0) {
           void vscode.window.showWarningMessage(t("No entities found in values file", "В values-файле не найдены сущности"));
           return;
@@ -450,14 +472,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
         const targetGroup = scope?.group ?? menu.selectedGroup;
         const targetApp = scope?.app ?? menu.selectedApp;
-        const envDiscovery = discoverEnvironments(values);
-        const defaultEnv = detectDefaultEnv(values, envDiscovery);
+        const defaultEnv = context.defaultEnv;
         const options: PreviewOptions = {
           env: defaultEnv,
           applyIncludes: true,
           applyEnvResolution: true,
           showDiff: false,
           renderMode: "values",
+          manifestBackend: readPreviewManifestBackend(),
         };
         showEntityPreview(editor.document, targetGroup, targetApp, options);
       } catch (err) {
@@ -544,7 +566,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (!(await isHelmAppsValuesDocument(editor.document))) {
-        void vscode.window.showWarningMessage(t("Open helm-apps values.yaml to generate settings help.", "Откройте helm-apps values.yaml для генерации help по настройкам."));
+        void vscode.window.showWarningMessage(t("Open helm-apps values.yaml to generate settings help.", "Откройте helm-apps values.yaml для формирования справки по настройкам."));
         return;
       }
       const ru = vscode.env.language.toLowerCase().startsWith("ru");
@@ -602,6 +624,7 @@ export function deactivate(): Thenable<void> | void {
 
 async function initializeLanguageFeatures(context: vscode.ExtensionContext): Promise<void> {
   resetPreviewThemeState();
+  templateAssistUnavailable = false;
   const cfg = getExtensionConfig();
   const mode = cfg.get<LanguageMode>("languageServerMode", "happ");
   const devHappPathOverride = await resolveDevHappPathOverride(context);
@@ -666,7 +689,7 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
       void vscode.window.showInformationMessage(
         t(
           `happ LSP started with fallback binary: ${candidatePath}`,
-          `happ LSP запущен через fallback-бинарник: ${candidatePath}`,
+          `happ LSP запущен через резервный бинарник: ${candidatePath}`,
         ),
       );
     }
@@ -802,7 +825,7 @@ async function refreshListPolicyDiagnosticsForDocument(document: vscode.TextDocu
     listPolicyDiagnostics.delete(document.uri);
     return;
   }
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     listPolicyDiagnostics.delete(document.uri);
     return;
   }
@@ -1157,7 +1180,7 @@ function renderLibrarySettingsHtml(current: Map<string, boolean>, ru: boolean): 
     ? "Выберите опции и примените их в values.yaml (блок global.*)."
     : "Choose options and apply them into values.yaml (global.* section).";
   const apply = ru ? "Применить в values.yaml" : "Apply to values.yaml";
-  const genHelp = ru ? "Сгенерировать help" : "Generate help";
+  const genHelp = ru ? "Сформировать справку" : "Generate help";
   const cancel = ru ? "Закрыть" : "Close";
 
   return `<!doctype html>
@@ -1545,6 +1568,14 @@ function getExtensionConfig() {
   return vscode.workspace.getConfiguration("helm-apps");
 }
 
+function readPreviewManifestBackend(cfg = getExtensionConfig()): ManifestPreviewBackend {
+  const value = cfg.get<string>("previewManifestBackend", "fast").trim();
+  if (MANIFEST_PREVIEW_BACKENDS.includes(value as ManifestPreviewBackend)) {
+    return value as ManifestPreviewBackend;
+  }
+  return "fast";
+}
+
 function getLibraryRepositoryURL(cfg = getExtensionConfig()): string {
   const preferred = cfg.get<string>("libraryRepositoryUrl", "").trim();
   if (preferred.length > 0) {
@@ -1767,11 +1798,11 @@ async function updateLibraryDependencyInChart(context: vscode.ExtensionContext):
     await upsertHelmAppsDependency(chartYamlUri.fsPath, resolved.version, resolved.chartPath);
     void vscode.window.showInformationMessage(
       ru
-        ? `Dependency helm-apps обновлен в ${chartYamlUri.fsPath}`
+        ? `Зависимость helm-apps обновлена в ${chartYamlUri.fsPath}`
         : `helm-apps dependency updated in ${chartYamlUri.fsPath}`,
     );
   } catch (err) {
-    void vscode.window.showErrorMessage(`${ru ? "Не удалось обновить dependency" : "Failed to update dependency"}: ${extractErrorMessage(err)}`);
+    void vscode.window.showErrorMessage(`${ru ? "Не удалось обновить зависимость" : "Failed to update dependency"}: ${extractErrorMessage(err)}`);
   }
 }
 
@@ -2141,6 +2172,7 @@ function showEntityPreview(
       applyEnvResolution: options.applyEnvResolution,
       showDiff: options.showDiff,
       renderMode: options.renderMode,
+      manifestBackend: options.manifestBackend,
     },
   };
 
@@ -2184,6 +2216,7 @@ function showEntityPreview(
         applyEnvResolution: msg.applyEnvResolution,
         showDiff: false,
         renderMode: msg.renderMode,
+        manifestBackend: msg.manifestBackend,
       };
       scheduleEntityPreviewRefresh(0);
     }
@@ -2228,16 +2261,34 @@ async function renderEntityPreview(): Promise<void> {
     const documentText = document.getText();
     const loaded = await loadExpandedValues(document);
     const values = loaded.values;
-    const menuModel = buildPreviewEntityMenuModel(values, state.group, state.app);
+    const previewContext = await resolvePreviewMenuAndEnv(
+      document,
+      documentText,
+      values,
+      state.group,
+      state.app,
+      state.options.env,
+    );
+    const menuModel = previewContext.menuModel;
     if (menuModel.groups.length === 0) {
       throw new Error("No entities found in values");
     }
     state.group = menuModel.selectedGroup;
     state.app = menuModel.selectedApp;
+    if (state.options.env.trim().length === 0 && previewContext.defaultEnv.trim().length > 0) {
+      state.options.env = previewContext.defaultEnv.trim();
+    }
     const title = `helm-apps preview: ${state.group}.${state.app}`;
-    const envDiscovery = discoverEnvironments(values);
+    const envDiscovery = previewContext.envDiscovery;
     const previewTheme = await getPreviewThemeForRender();
-    const payload = buildEntityPreviewPayload(values, state.group, state.app, state.options);
+    const payload = await buildEntityPreviewPayload(
+      document,
+      documentText,
+      values,
+      state.group,
+      state.app,
+      state.options,
+    );
     let renderText = payload.yamlText;
 
     if (state.options.renderMode === "manifest") {
@@ -2246,7 +2297,7 @@ async function renderEntityPreview(): Promise<void> {
       if (cached) {
         renderText = cached;
       } else {
-        renderText = await renderManifestFromHappLsp(document, documentText, state);
+        renderText = await renderManifest(document, documentText, state);
         cacheManifestPreview(cacheKey, renderText);
       }
     }
@@ -2266,7 +2317,7 @@ async function renderEntityPreview(): Promise<void> {
       previewTheme,
     );
 
-    if (state.options.renderMode === "values") {
+    if (state.options.renderMode === "values" && state.options.manifestBackend === "fast") {
       void prewarmManifestPreview(document, documentText, state);
     }
   } catch (err) {
@@ -2280,6 +2331,7 @@ async function renderEntityPreview(): Promise<void> {
         group: state.group,
         app: state.app,
         env: state.options.env,
+        renderer: state.options.manifestBackend,
       })
       : `# preview unavailable\n# ${message}`;
     const title = `helm-apps preview: ${state.group}.${state.app}`;
@@ -2319,13 +2371,13 @@ async function prewarmManifestPreview(
     documentUri: state.documentUri,
     group: state.group,
     app: state.app,
-    options: {
-      ...state.options,
-      renderMode: "manifest",
-    },
-  };
+      options: {
+        ...state.options,
+        renderMode: "manifest",
+      },
+    };
   try {
-    const manifest = await renderManifestFromHappLsp(document, documentText, snapshot);
+    const manifest = await renderManifest(document, documentText, snapshot);
     cacheManifestPreview(cacheKey, manifest);
   } catch {
     // ignore prewarm errors; primary render path will show explicit errors on demand
@@ -2334,14 +2386,16 @@ async function prewarmManifestPreview(
   }
 }
 
-function buildEntityPreviewPayload(
+async function buildEntityPreviewPayload(
+  document: vscode.TextDocument,
+  documentText: string,
   values: unknown,
   group: string,
   app: string,
   options: PreviewOptions,
-): { yamlText: string; diffSummary: string[] } {
+): Promise<{ yamlText: string; diffSummary: string[] }> {
   const rawEntity = readRawEntity(values, group, app);
-  const entity = resolvePreviewEntity(values, group, app, options);
+  const entity = await resolvePreviewEntity(document, documentText, values, group, app, options);
   const previewGlobal = buildPreviewGlobalProjection(values, entity, options.env);
   const diffSummary = options.showDiff ? diffObjects(rawEntity, entity) : [];
   const yamlText = YAML.stringify({
@@ -2373,6 +2427,181 @@ async function renderManifestFromHappLsp(
   return text.endsWith("\n") ? text : `${text}\n`;
 }
 
+async function renderManifest(
+  document: vscode.TextDocument,
+  documentText: string,
+  state: EntityPreviewState,
+): Promise<string> {
+  switch (state.options.manifestBackend) {
+    case "helm":
+      return await renderManifestFromHelmOrWerf(document, documentText, state, "helm");
+    case "werf":
+      return await renderManifestFromHelmOrWerf(document, documentText, state, "werf");
+    case "fast":
+    default:
+      return await renderManifestFromHappLsp(document, documentText, state);
+  }
+}
+
+async function renderManifestFromHelmOrWerf(
+  document: vscode.TextDocument,
+  documentText: string,
+  state: EntityPreviewState,
+  backend: "helm" | "werf",
+): Promise<string> {
+  const chartYaml = await findNearestChartYaml(document.uri.fsPath);
+  if (!chartYaml) {
+    throw new Error(`Chart.yaml not found for values file: ${document.uri.fsPath}`);
+  }
+
+  const chartDir = path.dirname(chartYaml.fsPath);
+  const manifestWorkDir = backend === "werf"
+    ? await resolveWerfProjectDir(chartDir)
+    : chartDir;
+
+  try {
+    const valuesFiles = await resolveManifestValuesFiles(document, chartDir);
+    const isolationSetValues = buildManifestEntityIsolationSetValues(
+      documentText,
+      state.group,
+      state.app,
+    );
+    if (!isolationSetValues) {
+      throw new Error(`unable to isolate entity ${state.group}.${state.app} for manifest render`);
+    }
+    const command = resolveManifestBackendCommand(backend);
+    const args = buildManifestBackendArgs(
+      backend,
+      backend === "werf" ? manifestWorkDir : chartDir,
+      valuesFiles,
+      isolationSetValues,
+      state.options.env,
+    );
+    const { stdout, stderr } = await execFileAsync(command, args, {
+      cwd: manifestWorkDir,
+      timeout: 240000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const text = String(stdout ?? "").trim();
+    if (text.length === 0) {
+      const details = String(stderr ?? "").trim();
+      throw new Error(details.length > 0 ? details : `${backend} render returned empty output`);
+    }
+    return text.endsWith("\n") ? text : `${text}\n`;
+  } catch (err) {
+    const prefix = backend === "helm" ? "helm template failed" : "werf render failed";
+    throw new Error(`${prefix}: ${extractErrorMessage(err)}`);
+  }
+}
+
+async function resolveWerfProjectDir(chartDir: string): Promise<string> {
+  let current = chartDir;
+  while (true) {
+    const configPath = path.join(current, "werf.yaml");
+    try {
+      await access(configPath, fsConstants.R_OK);
+      return current;
+    } catch {
+      // continue walking up
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return chartDir;
+    }
+    current = parent;
+  }
+}
+
+async function resolveManifestValuesFiles(
+  document: vscode.TextDocument,
+  chartDir: string,
+): Promise<string[]> {
+  const currentPath = path.resolve(document.uri.fsPath);
+  const rootDocs = await findHelmAppsRootDocuments(chartDir);
+  const normalizedRoots = new Set(rootDocs.map((current) => path.resolve(current)));
+  const primaryValues = await findPrimaryValuesFileForChart(chartDir);
+  const includeOwners = await collectIncludeOwnersForChart(chartDir);
+  const ownerCandidates = [...(includeOwners.get(currentPath) ?? [])].sort((a, b) => a.localeCompare(b));
+  if (ownerCandidates.length > 0) {
+    if (primaryValues && ownerCandidates.includes(primaryValues)) {
+      return [primaryValues];
+    }
+    return [ownerCandidates[0]];
+  }
+
+  if (normalizedRoots.has(currentPath)) {
+    if (primaryValues && currentPath !== primaryValues) {
+      return [primaryValues];
+    }
+    return [currentPath];
+  }
+
+  if (primaryValues) {
+    return [primaryValues];
+  }
+
+  return [currentPath];
+}
+
+async function findPrimaryValuesFileForChart(chartDir: string): Promise<string | undefined> {
+  const candidates = [path.join(chartDir, "values.yaml"), path.join(chartDir, "values.yml")];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, fsConstants.R_OK);
+      return path.resolve(candidate);
+    } catch {
+      // continue
+    }
+  }
+  return undefined;
+}
+
+function resolveManifestBackendCommand(backend: "helm" | "werf"): string {
+  const configured = getExtensionConfig().get<string>("helmPath", "helm").trim();
+  if (backend === "werf") {
+    if (configured.length > 0 && path.basename(configured) === "werf") {
+      return configured;
+    }
+    return "werf";
+  }
+  if (configured.length > 0 && path.basename(configured) !== "werf") {
+    return configured;
+  }
+  return "helm";
+}
+
+function buildManifestBackendArgs(
+  backend: "helm" | "werf",
+  chartDir: string,
+  valuesFiles: string[],
+  isolationSetValues: string[],
+  env: string,
+): string[] {
+  const valueArgs = valuesFiles
+    .map((current) => current.trim())
+    .filter((current) => current.length > 0)
+    .flatMap((current) => ["--values", current]);
+  const normalizedEnv = env.trim();
+  const setArgs = isolationSetValues
+    .map((current) => current.trim())
+    .filter((current) => current.length > 0)
+    .flatMap((current) => ["--set", current]);
+  const withEnvSet = (base: string[]): string[] => {
+    if (!normalizedEnv) {
+      return base;
+    }
+    return [...base, "--set-string", `global.env=${normalizedEnv}`];
+  };
+  if (backend === "werf") {
+    const args = ["render", "--dir", chartDir, "--dev", "--ignore-secret-key", ...valueArgs, ...setArgs];
+    if (normalizedEnv) {
+      args.push("--env", normalizedEnv);
+    }
+    return withEnvSet(args);
+  }
+  return withEnvSet(["template", "helm-apps-preview", chartDir, ...valueArgs, ...setArgs]);
+}
+
 function buildManifestPreviewCacheKey(
   document: vscode.TextDocument,
   state: EntityPreviewState,
@@ -2385,6 +2614,7 @@ function buildManifestPreviewCacheKey(
     state.options.env,
     state.options.applyIncludes ? "1" : "0",
     state.options.applyEnvResolution ? "1" : "0",
+    state.options.manifestBackend,
   ].join("|");
 }
 
@@ -2480,13 +2710,35 @@ function sanitizeCssColor(value: unknown, fallback: string): string {
   return fallback;
 }
 
-function resolvePreviewEntity(values: unknown, group: string, app: string, options: PreviewOptions): unknown {
-  let entity: unknown;
+async function resolvePreviewEntity(
+  document: vscode.TextDocument,
+  documentText: string,
+  values: unknown,
+  group: string,
+  app: string,
+  options: PreviewOptions,
+): Promise<unknown> {
   if (options.applyIncludes) {
-    entity = resolveEntityWithIncludes(values, group, app);
-  } else {
-    entity = readRawEntity(values, group, app);
+    if (!happLspClient.isRunning()) {
+      throw new Error("happ LSP is required for include resolution in preview");
+    }
+    try {
+      const resolved = await happLspClient.resolveEntity({
+        uri: document.uri.toString(),
+        text: documentText,
+        group,
+        app,
+        env: options.env,
+        applyIncludes: true,
+        applyEnvResolution: options.applyEnvResolution,
+      });
+      return forceEntityEnabled(resolved.entity);
+    } catch (err) {
+      throw new Error(`happ resolveEntity failed: ${extractErrorMessage(err)}`);
+    }
   }
+
+  let entity: unknown = readRawEntity(values, group, app);
   if (options.applyEnvResolution) {
     entity = resolveEnvMaps(entity, options.env);
   }
@@ -2532,6 +2784,87 @@ function buildPreviewEntityMenuModel(values: unknown, selectedGroup: string, sel
     selectedGroup: nextGroup,
     selectedApp: nextApp,
   };
+}
+
+function buildPreviewEntityMenuModelFromGroups(
+  groupsRaw: ReadonlyArray<{ name: string; apps: string[] }>,
+  selectedGroup: string,
+  selectedApp: string,
+): PreviewEntityMenuModel {
+  const groups = groupsRaw
+    .map((group) => ({
+      name: group.name,
+      apps: [...group.apps]
+        .filter((app) => typeof app === "string" && app.trim().length > 0)
+        .map((app) => app.trim())
+        .sort((a, b) => a.localeCompare(b)),
+    }))
+    .filter((group) => group.name.trim().length > 0 && group.apps.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (groups.length === 0) {
+    return { groups: [], selectedGroup, selectedApp };
+  }
+  const nextGroup = groups.some((group) => group.name === selectedGroup) ? selectedGroup : groups[0].name;
+  const nextApps = groups.find((group) => group.name === nextGroup)?.apps ?? [];
+  const nextApp = nextApps.includes(selectedApp) ? selectedApp : (nextApps[0] ?? selectedApp);
+  return {
+    groups,
+    selectedGroup: nextGroup,
+    selectedApp: nextApp,
+  };
+}
+
+async function resolvePreviewMenuAndEnv(
+  document: vscode.TextDocument,
+  documentText: string,
+  values: unknown,
+  selectedGroup: string,
+  selectedApp: string,
+  env: string,
+): Promise<{
+  menuModel: PreviewEntityMenuModel;
+  envDiscovery: EnvironmentDiscovery;
+  defaultEnv: string;
+}> {
+  let menuModel = buildPreviewEntityMenuModel(values, selectedGroup, selectedApp);
+  let envDiscovery = discoverEnvironments(values);
+  let defaultEnv = detectDefaultEnv(values, envDiscovery);
+
+  if (!happLspClient.isRunning()) {
+    return { menuModel, envDiscovery, defaultEnv };
+  }
+
+  try {
+    const listed = await happLspClient.listEntities({
+      uri: document.uri.toString(),
+      text: documentText,
+      env,
+      applyIncludes: true,
+      applyEnvResolution: true,
+    });
+    const fromHapp = buildPreviewEntityMenuModelFromGroups(
+      listed.groups,
+      selectedGroup,
+      selectedApp,
+    );
+    if (fromHapp.groups.length > 0) {
+      menuModel = fromHapp;
+    }
+    envDiscovery = {
+      literals: [...listed.envDiscovery.literals],
+      regexes: [...listed.envDiscovery.regexes],
+    };
+    if (listed.defaultEnv.trim().length > 0) {
+      defaultEnv = listed.defaultEnv.trim();
+    }
+  } catch (err) {
+    happLspBootstrapOutput.appendLine(
+      `[preview] listEntities fallback to local model: ${extractErrorMessage(err)}`,
+    );
+  }
+
+  return { menuModel, envDiscovery, defaultEnv };
 }
 
 function buildPreviewGlobalProjection(
@@ -2659,7 +2992,7 @@ async function provideAppDefinition(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): Promise<vscode.Definition | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const symbol = findSymbolAtPosition(document.getText(), position.line, position.character);
@@ -2685,7 +3018,7 @@ async function provideIncludeDefinition(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): Promise<vscode.Definition | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const includeName = getIncludeNameUnderCursor(document, position);
@@ -2718,7 +3051,7 @@ async function provideReferences(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): Promise<vscode.Location[] | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
 
@@ -2743,7 +3076,7 @@ async function prepareRename(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): Promise<vscode.Range | { range: vscode.Range; placeholder: string } | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const symbol = findSymbolAtPosition(document.getText(), position.line, position.character);
@@ -2773,7 +3106,7 @@ async function provideRenameEdits(
   position: vscode.Position,
   newName: string,
 ): Promise<vscode.WorkspaceEdit | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const symbol = findSymbolAtPosition(document.getText(), position.line, position.character);
@@ -2824,13 +3157,15 @@ async function collectWorkspaceSymbolOccurrences(
     new vscode.RelativePattern(chartRoot, "**/*.{yaml,yml}"),
     "**/{.git,node_modules,vendor,tmp,.werf}/**",
   );
+  const includeFiles = await collectIncludeFilesForChart(chartRoot);
 
   for (const uri of files) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const doc = await vscode.workspace.openTextDocument(uri);
       const text = doc.getText();
-      if (!looksLikeHelmAppsValuesText(text)) {
+      const isIncludedFile = includeFiles.has(path.resolve(uri.fsPath));
+      if (!looksLikeHelmAppsValuesText(text) && !isIncludedFile) {
         continue;
       }
       const occs = collectSymbolOccurrences(text, symbol);
@@ -2853,9 +3188,15 @@ async function collectWorkspaceSymbolOccurrences(
 async function provideCompletionItems(
   document: vscode.TextDocument,
   position: vscode.Position,
+  completionContext?: vscode.CompletionContext,
 ): Promise<vscode.CompletionItem[] | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
+  }
+
+  const templateCompletions = await buildTemplateCompletionItems(document, position, completionContext);
+  if (templateCompletions) {
+    return templateCompletions;
   }
 
   const text = document.getText();
@@ -2932,6 +3273,97 @@ async function provideCompletionItems(
     return undefined;
   }
   return dedupeCompletionItems(items);
+}
+
+async function buildTemplateCompletionItems(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+  completionContext?: vscode.CompletionContext,
+): Promise<vscode.CompletionItem[] | undefined> {
+  if (!happLspClient.isRunning() || templateAssistUnavailable) {
+    return undefined;
+  }
+  if (!shouldRequestTemplateAssist(document, position, completionContext)) {
+    return undefined;
+  }
+  try {
+    const result = await happLspClient.templateAssist({
+      uri: document.uri.toString(),
+      text: document.getText(),
+      line: position.line,
+      character: position.character,
+    });
+    if (!result.insideTemplate) {
+      return undefined;
+    }
+    const items = result.completions.map((completion) =>
+      mapTemplateAssistCompletionToItem(completion, position.line),
+    );
+    return dedupeCompletionItems(items);
+  } catch (err) {
+    const message = extractErrorMessage(err);
+    if (
+      message.includes("does not support template assist request")
+      || message.includes("method not implemented")
+    ) {
+      templateAssistUnavailable = true;
+    }
+    happLspBootstrapOutput.appendLine(`[completion] templateAssist fallback: ${message}`);
+    return undefined;
+  }
+}
+
+function shouldRequestTemplateAssist(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+  completionContext?: vscode.CompletionContext,
+): boolean {
+  const trigger = completionContext?.triggerCharacter;
+  if (trigger === "$" || trigger === ".") {
+    return true;
+  }
+  const startLine = Math.max(0, position.line - 40);
+  const prefixRange = new vscode.Range(startLine, 0, position.line, position.character);
+  const prefix = document.getText(prefixRange);
+  const open = prefix.lastIndexOf("{{");
+  if (open < 0) {
+    return false;
+  }
+  const close = prefix.lastIndexOf("}}");
+  return close < open;
+}
+
+function mapTemplateAssistCompletionToItem(
+  completion: {
+    label: string;
+    insertText: string;
+    detail: string;
+    kind: string;
+    replaceStart: number;
+    replaceEnd: number;
+  },
+  line: number,
+): vscode.CompletionItem {
+  let kind = vscode.CompletionItemKind.Text;
+  if (completion.kind === "property") {
+    kind = vscode.CompletionItemKind.Field;
+  } else if (completion.kind === "keyword") {
+    kind = vscode.CompletionItemKind.Keyword;
+  } else if (completion.kind === "snippet") {
+    kind = vscode.CompletionItemKind.Snippet;
+  }
+  const item = new vscode.CompletionItem(completion.label, kind);
+  if (completion.kind === "snippet") {
+    item.insertText = new vscode.SnippetString(completion.insertText);
+  } else {
+    item.insertText = completion.insertText;
+  }
+  item.detail = completion.detail;
+  item.sortText = `00_tpl_${completion.label}`;
+  const start = Math.max(0, completion.replaceStart);
+  const end = Math.max(start, completion.replaceEnd);
+  item.range = new vscode.Range(new vscode.Position(line, start), new vscode.Position(line, end));
+  return item;
 }
 
 function pushSnippet(items: vscode.CompletionItem[], label: string, insert: string, detail: string): void {
@@ -3290,7 +3722,7 @@ async function provideCodeActions(
   range: vscode.Range | vscode.Selection,
   context?: vscode.CodeActionContext,
 ): Promise<vscode.CodeAction[] | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const lineNumber = range.start.line;
@@ -3592,11 +4024,11 @@ async function provideIncludeHover(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): Promise<vscode.Hover | undefined> {
-  if (!(await isHelmAppsValuesDocument(document))) {
+  if (!(await isHelmAppsLanguageDocument(document))) {
     return undefined;
   }
   const ru = vscode.env.language.toLowerCase().startsWith("ru");
-  const includeLabel = ru ? "инклуд" : "include";
+  const includeLabel = ru ? "include-профиль" : "include profile";
   const sourceLabel = ru ? "источник" : "source";
 
   const includeName = getIncludeNameUnderCursor(document, position);
@@ -3610,34 +4042,50 @@ async function provideIncludeHover(
       return new vscode.Hover(md);
     }
 
-    const loaded = await loadExpandedValues(document);
-    const fileDef = loaded.includeDefinitions.find((d) => d.name === includeName);
-    if (fileDef) {
-      const raw = await readFile(fileDef.filePath, "utf8");
-      const md = new vscode.MarkdownString();
-      md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
-      md.appendMarkdown(`${sourceLabel}: \`${fileDef.filePath}\`\n\n`);
-      md.appendCodeblock(trimPreview(raw), "yaml");
-      return new vscode.Hover(md);
+    try {
+      const loaded = await loadExpandedValues(document);
+      const fileDef = loaded.includeDefinitions.find((d) => d.name === includeName);
+      if (fileDef) {
+        const raw = await readFile(fileDef.filePath, "utf8");
+        const previewBlock = extractIncludeProfileBlock(raw, includeName);
+        const previewText = previewBlock
+          ? previewBlock
+          : trimPreview(raw, 48, 3200);
+        const md = new vscode.MarkdownString();
+        md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
+        md.appendMarkdown(`${sourceLabel}: \`${fileDef.filePath}\`\n\n`);
+        md.appendCodeblock(previewText, "yaml");
+        return new vscode.Hover(md);
+      }
+
+      const resolved = toMap(toMap(loaded.values.global)?._includes)?.[includeName];
+      if (resolved !== undefined) {
+        const md = new vscode.MarkdownString();
+        md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
+        md.appendMarkdown(`${sourceLabel}: ${ru ? "разрешённый global._includes" : "resolved global._includes"}\n\n`);
+        md.appendCodeblock(trimPreview(YAML.stringify({ [includeName]: resolved }), 90, 7000), "yaml");
+        return new vscode.Hover(md);
+      }
+    } catch {
+      // Ignore parse/include expansion errors and continue with file-based lookup fallback.
     }
 
     const discovered = await findIncludeDefinitionInReferencedFiles(document, includeName);
     if (discovered) {
-      const raw = await readFile(discovered.uri.fsPath, "utf8");
-      const md = new vscode.MarkdownString();
-      md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
-      md.appendMarkdown(`${sourceLabel}: \`${discovered.uri.fsPath}\`\n\n`);
-      md.appendCodeblock(trimPreview(raw), "yaml");
-      return new vscode.Hover(md);
-    }
-
-    const resolved = toMap(toMap(loaded.values.global)?._includes)?.[includeName];
-    if (resolved !== undefined) {
-      const md = new vscode.MarkdownString();
-      md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
-      md.appendMarkdown(`${sourceLabel}: ${ru ? "разрешённый global._includes" : "resolved global._includes"}\n\n`);
-      md.appendCodeblock(trimPreview(YAML.stringify({ [includeName]: resolved })), "yaml");
-      return new vscode.Hover(md);
+      try {
+        const raw = await readFile(discovered.uri.fsPath, "utf8");
+        const previewBlock = extractIncludeProfileBlock(raw, includeName);
+        const previewText = previewBlock
+          ? previewBlock
+          : trimPreview(raw, 48, 3200);
+        const md = new vscode.MarkdownString();
+        md.appendMarkdown(`**${includeLabel}** \`${includeName}\`  \n`);
+        md.appendMarkdown(`${sourceLabel}: \`${discovered.uri.fsPath}\`\n\n`);
+        md.appendCodeblock(previewText, "yaml");
+        return new vscode.Hover(md);
+      } catch {
+        // skip unreadable file include refs
+      }
     }
   }
 
@@ -3677,16 +4125,19 @@ async function discoverHelmAppsSchemaTargets(): Promise<string[]> {
       continue;
     }
     const chartDir = path.dirname(chart.fsPath);
-    const patterns = ["values*.yaml", "values*.yml"];
-    for (const p of patterns) {
-      // eslint-disable-next-line no-await-in-loop
-      const valuesFiles = await vscode.workspace.findFiles(
-        new vscode.RelativePattern(chartDir, p),
-        "**/{.git,node_modules,vendor,tmp,.werf}/**",
-      );
-      for (const v of valuesFiles) {
-        out.add(vscode.workspace.asRelativePath(v, false));
-      }
+    // Root helm-apps values files may have arbitrary names.
+    // Use content-based detection instead of values*.yaml convention.
+    // eslint-disable-next-line no-await-in-loop
+    const rootDocs = await findHelmAppsRootDocuments(chartDir);
+    for (const filePath of rootDocs) {
+      out.add(vscode.workspace.asRelativePath(vscode.Uri.file(filePath), false));
+    }
+
+    // Include files referenced from values/_include_files are chart-related documents
+    // and should receive the same schema support.
+    const includeFiles = await collectIncludeFilesForChart(chartDir);
+    for (const filePath of includeFiles) {
+      out.add(vscode.workspace.asRelativePath(vscode.Uri.file(filePath), false));
     }
   }
 
@@ -3737,6 +4188,173 @@ async function isHelmAppsValuesDocument(document: vscode.TextDocument): Promise<
   return await isHelmAppsChart(chart);
 }
 
+async function isHelmAppsLanguageDocument(document: vscode.TextDocument): Promise<boolean> {
+  if (await isHelmAppsValuesDocument(document)) {
+    return true;
+  }
+  return await isHelmAppsIncludedFileDocument(document);
+}
+
+async function isHelmAppsIncludedFileDocument(document: vscode.TextDocument): Promise<boolean> {
+  if (document.languageId !== "yaml") {
+    return false;
+  }
+  const chart = await findNearestChartYaml(document.uri.fsPath);
+  if (!chart) {
+    return false;
+  }
+  if (!(await isHelmAppsChart(chart))) {
+    return false;
+  }
+  const chartDir = path.dirname(chart.fsPath);
+  const includedFiles = await collectIncludeFilesForChart(chartDir);
+  return includedFiles.has(path.resolve(document.uri.fsPath));
+}
+
+async function collectIncludeFilesForChart(chartDir: string): Promise<Set<string>> {
+  const now = Date.now();
+  const cached = includeFilesByChartCache.get(chartDir);
+  if (cached && now - cached.scannedAt <= INCLUDE_FILE_CACHE_TTL_MS) {
+    return new Set(cached.files);
+  }
+
+  const discovered = new Set<string>();
+  const scanned = new Set<string>();
+  const queue = await findHelmAppsRootDocuments(chartDir);
+
+  while (queue.length > 0) {
+    const current = path.resolve(String(queue.pop() ?? ""));
+    if (current.length === 0 || scanned.has(current)) {
+      continue;
+    }
+    scanned.add(current);
+
+    let text = "";
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      text = await readFile(current, "utf8");
+    } catch {
+      continue;
+    }
+
+    const refs = collectIncludeFileRefs(text);
+    const baseDir = path.dirname(current);
+    for (const ref of refs) {
+      if (isTemplatedIncludePath(ref.path)) {
+        continue;
+      }
+      const candidates = buildIncludeCandidates(ref.path, baseDir);
+      for (const candidate of candidates) {
+        const abs = path.resolve(candidate);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await access(abs);
+          if (!discovered.has(abs)) {
+            discovered.add(abs);
+            queue.push(abs);
+          }
+          break;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+  }
+
+  includeFilesByChartCache.set(chartDir, { scannedAt: now, files: discovered });
+  return new Set(discovered);
+}
+
+async function collectIncludeOwnersForChart(chartDir: string): Promise<Map<string, Set<string>>> {
+  const now = Date.now();
+  const cached = includeOwnersByChartCache.get(chartDir);
+  if (cached && now - cached.scannedAt <= INCLUDE_FILE_CACHE_TTL_MS) {
+    return cloneIncludeOwnersMap(cached.owners);
+  }
+
+  const owners = new Map<string, Set<string>>();
+  const roots = (await findHelmAppsRootDocuments(chartDir)).map((current) => path.resolve(current));
+  for (const root of roots) {
+    const visited = new Set<string>();
+    const queue: string[] = [root];
+    while (queue.length > 0) {
+      const current = path.resolve(String(queue.pop() ?? ""));
+      if (current.length === 0 || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      let text = "";
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        text = await readFile(current, "utf8");
+      } catch {
+        continue;
+      }
+
+      const refs = collectIncludeFileRefs(text);
+      const baseDir = path.dirname(current);
+      for (const ref of refs) {
+        if (isTemplatedIncludePath(ref.path)) {
+          continue;
+        }
+        const candidates = buildIncludeCandidates(ref.path, baseDir);
+        for (const candidate of candidates) {
+          const includedPath = path.resolve(candidate);
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await access(includedPath, fsConstants.R_OK);
+            if (!owners.has(includedPath)) {
+              owners.set(includedPath, new Set<string>());
+            }
+            owners.get(includedPath)?.add(root);
+            if (!visited.has(includedPath)) {
+              queue.push(includedPath);
+            }
+            break;
+          } catch {
+            // try next candidate
+          }
+        }
+      }
+    }
+  }
+
+  includeOwnersByChartCache.set(chartDir, {
+    scannedAt: now,
+    owners: cloneIncludeOwnersMap(owners),
+  });
+  return owners;
+}
+
+function cloneIncludeOwnersMap(source: Map<string, Set<string>>): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const [key, owners] of source) {
+    out.set(key, new Set<string>(owners));
+  }
+  return out;
+}
+
+async function findHelmAppsRootDocuments(chartDir: string): Promise<string[]> {
+  const out = new Set<string>();
+  const yamlFiles = await vscode.workspace.findFiles(
+    new vscode.RelativePattern(chartDir, "**/*.{yaml,yml}"),
+    "**/{.git,node_modules,vendor,tmp,.werf,templates}/**",
+  );
+  for (const file of yamlFiles) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const text = await readFile(file.fsPath, "utf8");
+      if (looksLikeHelmAppsValuesText(text)) {
+        out.add(path.resolve(file.fsPath));
+      }
+    } catch {
+      // ignore unreadable yaml file
+    }
+  }
+  return [...out];
+}
+
 function looksLikeHelmAppsValuesText(text: string): boolean {
   if (/\n?global:\s*/m.test(text) && /(?:^|\n)\s*_includes:\s*/m.test(text)) {
     return true;
@@ -3773,7 +4391,7 @@ async function findNearestChartYaml(fromFile: string): Promise<vscode.Uri | unde
 function getIncludeNameUnderCursor(document: vscode.TextDocument, position: vscode.Position): string | null {
   const lines = document.getText().split(/\r?\n/);
   const line = lines[position.line] ?? "";
-  const token = tokenUnderCursor(line, position.character);
+  const token = tokenNearCursor(line, position.character);
   if (!token) {
     return null;
   }
@@ -3811,6 +4429,30 @@ function getIncludeNameUnderCursor(document: vscode.TextDocument, position: vsco
     return null;
   }
   return token;
+}
+
+function tokenNearCursor(line: string, char: number): string | null {
+  const clamped = Math.max(0, Math.min(char, line.length));
+  const maxDistance = 2;
+  for (let d = 0; d <= maxDistance; d += 1) {
+    const left = clamped - d;
+    if (left >= 0) {
+      const token = tokenUnderCursor(line, left);
+      if (token) {
+        return token;
+      }
+    }
+    if (d > 0) {
+      const right = clamped + d;
+      if (right <= line.length) {
+        const token = tokenUnderCursor(line, right);
+        if (token) {
+          return token;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function indexIncludeDefinitions(
@@ -4030,6 +4672,9 @@ function renderPreviewHtml(
   const renderModeManifestActive = options.renderMode === "manifest" ? "active" : "";
   const renderModeValuesSelected = options.renderMode === "values" ? "true" : "false";
   const renderModeManifestSelected = options.renderMode === "manifest" ? "true" : "false";
+  const manifestBackendFastSelected = options.manifestBackend === "fast" ? "selected" : "";
+  const manifestBackendHelmSelected = options.manifestBackend === "helm" ? "selected" : "";
+  const manifestBackendWerfSelected = options.manifestBackend === "werf" ? "selected" : "";
   const hasEntities = menu.groups.length > 0;
   const entityDisabled = hasEntities ? "" : "disabled";
   const entityLabel = hasEntities ? `${menu.selectedGroup}.${menu.selectedApp}` : "no entities";
@@ -4308,6 +4953,13 @@ function renderPreviewHtml(
         <input id="envInput" type="text" value="${escapeHtml(options.env)}" />
       </label>
       ${knownEnvSelect}
+      <label>manifest via:
+        <select id="manifestBackendSelect">
+          <option value="fast" ${manifestBackendFastSelected}>fast (happ)</option>
+          <option value="helm" ${manifestBackendHelmSelected}>helm</option>
+          <option value="werf" ${manifestBackendWerfSelected}>werf</option>
+        </select>
+      </label>
     </div>
     <div class="render-shell">
       <div class="mode-tabs" role="tablist" aria-label="render mode">
@@ -4323,6 +4975,7 @@ function renderPreviewHtml(
       const menu = ${menuJson};
       const envInput = document.getElementById("envInput");
       const envSelect = document.getElementById("envSelect");
+      const manifestBackendSelect = document.getElementById("manifestBackendSelect");
       const renderModeTabs = document.querySelectorAll(".mode-tab");
       const entityTrigger = document.getElementById("entityTrigger");
       const entityPopup = document.getElementById("entityPopup");
@@ -4332,6 +4985,9 @@ function renderPreviewHtml(
       let selectedApp = menu.selectedApp;
       let submenuGroup = menu.selectedGroup;
       let selectedRenderMode = options.renderMode === "manifest" ? "manifest" : "values";
+      let selectedManifestBackend = options.manifestBackend === "helm" || options.manifestBackend === "werf"
+        ? options.manifestBackend
+        : "fast";
 
       const emitDebounced = (() => {
         let timer;
@@ -4364,6 +5020,19 @@ function renderPreviewHtml(
             return;
           }
           envInput.value = envSelect.value;
+          emit();
+        });
+      }
+      if (manifestBackendSelect instanceof HTMLSelectElement) {
+        manifestBackendSelect.addEventListener("change", () => {
+          const mode = manifestBackendSelect.value;
+          if (mode !== "fast" && mode !== "helm" && mode !== "werf") {
+            return;
+          }
+          if (selectedManifestBackend === mode) {
+            return;
+          }
+          selectedManifestBackend = mode;
           emit();
         });
       }
@@ -4558,7 +5227,8 @@ function renderPreviewHtml(
           applyIncludes: true,
           applyEnvResolution: true,
           showDiff: false,
-          renderMode
+          renderMode,
+          manifestBackend: selectedManifestBackend
         });
       }
 
@@ -4724,6 +5394,7 @@ function isWebviewMessage(
   applyEnvResolution: boolean;
   showDiff: boolean;
   renderMode: "values" | "manifest";
+  manifestBackend: ManifestPreviewBackend;
 } {
   if (!value || typeof value !== "object") {
     return false;
@@ -4735,7 +5406,8 @@ function isWebviewMessage(
     && typeof v.applyIncludes === "boolean"
     && typeof v.applyEnvResolution === "boolean"
     && typeof v.showDiff === "boolean"
-    && (v.renderMode === "values" || v.renderMode === "manifest");
+    && (v.renderMode === "values" || v.renderMode === "manifest")
+    && (v.manifestBackend === "fast" || v.manifestBackend === "helm" || v.manifestBackend === "werf");
 }
 
 function isMap(value: unknown): value is Record<string, unknown> {

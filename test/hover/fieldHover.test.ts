@@ -112,6 +112,16 @@ test("include profile payload path gets dedicated include-profile hover", () => 
   assert.equal(nested?.title, "Include Profile Field");
 });
 
+test("global._includes helper keys use helper docs, not include-profile entry doc", () => {
+  const fromFile = findFieldDoc(["global", "_includes", "_include_from_file"]);
+  assert.ok(fromFile);
+  assert.equal(fromFile?.title, "Inline Include From File");
+
+  const includeFiles = findFieldDoc(["global", "_includes", "_include_files"]);
+  assert.ok(includeFiles);
+  assert.equal(includeFiles?.title, "Import Include Profiles From Files");
+});
+
 test("returns resources doc for kafka-strimzi app resources key", () => {
   const doc = findFieldDoc(["apps-kafka-strimzi", "test-kafka", "resources"]);
   assert.ok(doc);

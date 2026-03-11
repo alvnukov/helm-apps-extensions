@@ -38,6 +38,15 @@ export function extractLocalIncludeBlock(text: string, includeName: string): str
   return null;
 }
 
+export function extractIncludeProfileBlock(text: string, includeName: string): string | null {
+  const local = extractLocalIncludeBlock(text, includeName);
+  if (local) {
+    return local;
+  }
+
+  return extractTopLevelKeyBlock(text, includeName);
+}
+
 export function trimPreview(text: string, maxLines = 80, maxChars = 8000): string {
   let out = text;
   const lines = out.split(/\r?\n/);
@@ -48,6 +57,29 @@ export function trimPreview(text: string, maxLines = 80, maxChars = 8000): strin
     out = `${out.slice(0, maxChars)}\n# ...truncated`;
   }
   return out;
+}
+
+function extractTopLevelKeyBlock(text: string, key: string): string | null {
+  const lines = text.split(/\r?\n/);
+  const keyPattern = new RegExp(`^([ \\t]*)(?:["'])?${escapeRegex(key)}(?:["'])?:\\s*(.*)$`);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim().length === 0 || line.trim().startsWith("#")) {
+      continue;
+    }
+    const match = line.match(keyPattern);
+    if (!match) {
+      continue;
+    }
+    if (match[1].length !== 0) {
+      continue;
+    }
+    const end = findBlockEnd(lines, i + 1, 0);
+    return lines.slice(i, end).join("\n");
+  }
+
+  return null;
 }
 
 function findBlockEnd(lines: string[], start: number, ownerIndent: number): number {
@@ -62,6 +94,10 @@ function findBlockEnd(lines: string[], start: number, ownerIndent: number): numb
     }
   }
   return lines.length;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function stripIndent(block: string, indent: number): string {

@@ -47,7 +47,7 @@ export class HelmAppsWorkbenchActionsProvider implements vscode.TreeDataProvider
           icon: new vscode.ThemeIcon("new-folder"),
         },
         {
-          label: "Превью сущности",
+          label: "Предпросмотр сущности",
           description: "Резолв _include/env и предпросмотр выбранного apps-* блока",
           command: "helm-apps.previewResolvedEntity",
           icon: new vscode.ThemeIcon("preview"),
@@ -77,14 +77,14 @@ export class HelmAppsWorkbenchActionsProvider implements vscode.TreeDataProvider
           icon: new vscode.ThemeIcon("repo"),
         },
         {
-          label: "Обновить dependency",
-          description: "Обновить helm-apps dependency в ближайшем Chart.yaml",
+          label: "Обновить зависимость",
+          description: "Обновить зависимость helm-apps в ближайшем Chart.yaml",
           command: "helm-apps.updateLibraryDependency",
           icon: new vscode.ThemeIcon("package"),
         },
         {
           label: "Обновить Chart.lock",
-          description: "Запустить helm dependency update для чарта",
+          description: "Запустить обновление зависимостей helm для чарта",
           command: "helm-apps.updateLibraryLockfile",
           icon: new vscode.ThemeIcon("sync"),
         },

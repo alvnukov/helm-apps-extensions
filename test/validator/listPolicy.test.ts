@@ -15,6 +15,12 @@ test("allows _include native list", () => {
   assert.equal(issues.length, 0);
 });
 
+test("allows _include_files native list aligned with parent key", () => {
+  const yaml = `\nglobal:\n  _includes:\n    defaults:\n      _include_files:\n      - apps-common.yaml\n      - apps-extra.yaml\n`;
+  const issues = validateUnexpectedNativeLists(yaml);
+  assert.equal(issues.length, 0);
+});
+
 test("allows global._includes list", () => {
   const yaml = `\nglobal:\n  _includes:\n    apps-defaults:\n      _include:\n        - a\n      labels:\n        x: y\n`;
   const issues = validateUnexpectedNativeLists(yaml);
@@ -26,6 +32,13 @@ test("forbids containers native env list", () => {
   const issues = validateUnexpectedNativeLists(yaml);
   assert.equal(issues.length, 1);
   assert.equal(issues[0].code, "E_UNEXPECTED_LIST");
+  assert.equal(issues[0].path, "Values.apps-stateless.api.containers.main.env");
+});
+
+test("keeps exact path for native list aligned with parent key", () => {
+  const yaml = `\napps-stateless:\n  api:\n    containers:\n      main:\n        env:\n        - name: A\n          value: B\n`;
+  const issues = validateUnexpectedNativeLists(yaml);
+  assert.equal(issues.length, 1);
   assert.equal(issues[0].path, "Values.apps-stateless.api.containers.main.env");
 });
 

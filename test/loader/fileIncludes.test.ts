@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,14 +24,15 @@ test("expands _include_files into global._includes and _include", async () => {
   const expanded = await expandValuesWithFileIncludes(values, join(dir, "values.yaml"), async (p) =>
     await readFile(p, "utf8"),
   );
+  const includeName = createHash("sha256").update("apps-common.yaml").digest("hex");
 
   const app = ((expanded.values["apps-stateless"] as Record<string, unknown>).api as Record<string, unknown>);
-  assert.deepEqual(app._include, ["apps-common"]);
+  assert.deepEqual(app._include, [includeName]);
 
   const gl = expanded.values.global as Record<string, unknown>;
   const includes = gl._includes as Record<string, unknown>;
-  assert.ok(includes["apps-common"]);
-  assert.equal(expanded.includeDefinitions[0].name, "apps-common");
+  assert.ok(includes[includeName]);
+  assert.equal(expanded.includeDefinitions[0].name, includeName);
   assert.equal(expanded.includeDefinitions[0].filePath, includeFile);
 });
 
@@ -56,6 +58,77 @@ test("expands _include_from_file and lets local override", async () => {
   assert.equal(svc.enabled, false);
   assert.equal(svc.labels, "a: b\n");
   assert.equal(Object.prototype.hasOwnProperty.call(svc, "_include_from_file"), false);
+});
+
+test("applies _include_from_file merge before recursive processing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "helm-apps-ext-"));
+  await writeFile(
+    join(dir, "base.yaml"),
+    "nested:\n  _include_from_file: nested-base.yaml\n",
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "nested-base.yaml"),
+    "fromBase: true\n",
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "nested-local.yaml"),
+    "fromLocal: true\n",
+    "utf8",
+  );
+
+  const values = {
+    "apps-services": {
+      svc: {
+        _include_from_file: "base.yaml",
+        nested: {
+          _include_from_file: "nested-local.yaml",
+        },
+      },
+    },
+  } as Record<string, unknown>;
+
+  const expanded = await expandValuesWithFileIncludes(values, join(dir, "values.yaml"), async (p) =>
+    await readFile(p, "utf8"),
+  );
+
+  const svc = ((expanded.values["apps-services"] as Record<string, unknown>).svc as Record<string, unknown>);
+  const nested = svc.nested as Record<string, unknown>;
+  assert.equal(nested.fromLocal, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(nested, "fromBase"), false);
+});
+
+test("resolves nested _include_from_file relative to chart values root", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "helm-apps-ext-"));
+  await mkdir(join(dir, "profiles"), { recursive: true });
+  await mkdir(join(dir, "common"), { recursive: true });
+  await writeFile(
+    join(dir, "profiles", "base.yaml"),
+    "nested:\n  _include_from_file: common/nested.yaml\n",
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "common", "nested.yaml"),
+    "fromRoot: true\n",
+    "utf8",
+  );
+
+  const values = {
+    "apps-services": {
+      svc: {
+        _include_from_file: "profiles/base.yaml",
+      },
+    },
+  } as Record<string, unknown>;
+
+  const expanded = await expandValuesWithFileIncludes(values, join(dir, "values.yaml"), async (p) =>
+    await readFile(p, "utf8"),
+  );
+
+  const svc = ((expanded.values["apps-services"] as Record<string, unknown>).svc as Record<string, unknown>);
+  const nested = svc.nested as Record<string, unknown>;
+  assert.equal(nested.fromRoot, true);
 });
 
 test("registers include definitions loaded via global._includes._include_from_file", async () => {
@@ -85,6 +158,42 @@ test("registers include definitions loaded via global._includes._include_from_fi
   assert.ok(includes["apps-ingresses-defaultIngress"]);
   assert.ok(expanded.includeDefinitions.some((d) =>
     d.name === "apps-ingresses-defaultIngress" && d.filePath === includeFile));
+});
+
+test("supports _include_from_file with wrapped global._includes payload", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "helm-apps-ext-"));
+  const includeFile = join(dir, "helm-apps-defaults.yaml");
+  await writeFile(includeFile, [
+    "global:",
+    "  _includes:",
+    "    apps-stateless-defaultApp:",
+    "      enabled: true",
+    "",
+  ].join("\n"), "utf8");
+
+  const values = {
+    global: {
+      _includes: {
+        _include_from_file: "helm-apps-defaults.yaml",
+      },
+    },
+    "apps-stateless": {
+      app1: {
+        _include: ["apps-stateless-defaultApp"],
+      },
+    },
+  } as Record<string, unknown>;
+
+  const expanded = await expandValuesWithFileIncludes(values, join(dir, "values.yaml"), async (p) =>
+    await readFile(p, "utf8"),
+  );
+
+  const gl = expanded.values.global as Record<string, unknown>;
+  const includes = gl._includes as Record<string, unknown>;
+  assert.ok(includes["apps-stateless-defaultApp"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(includes, "global"), false);
+  assert.ok(expanded.includeDefinitions.some((d) =>
+    d.name === "apps-stateless-defaultApp" && d.filePath === includeFile));
 });
 
 test("does not resolve include file from parent directories", async () => {
@@ -135,6 +244,29 @@ test("skips missing include files without error", async () => {
   assert.equal(Object.prototype.hasOwnProperty.call(svc, "_include_from_file"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(svc, "_include_files"), false);
   assert.deepEqual(svc._include, []);
+});
+
+test("expands scalar _include_files as one include path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "helm-apps-ext-"));
+  await mkdir(join(dir, "profiles"), { recursive: true });
+  const includeFile = join(dir, "profiles", "default-app.yaml");
+  await writeFile(includeFile, "enabled: true\n", "utf8");
+
+  const values = {
+    global: { _includes: {} },
+    "apps-stateless": {
+      api: {
+        _include_files: "profiles/default-app.yaml",
+      },
+    },
+  } as Record<string, unknown>;
+
+  const expanded = await expandValuesWithFileIncludes(values, join(dir, "values.yaml"), async (p) =>
+    await readFile(p, "utf8"),
+  );
+  const includeName = createHash("sha256").update("profiles/default-app.yaml").digest("hex");
+  const api = ((expanded.values["apps-stateless"] as Record<string, unknown>).api as Record<string, unknown>);
+  assert.deepEqual(api._include, [includeName]);
 });
 
 test("skips include path with ENOTDIR without error", async () => {
