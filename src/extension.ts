@@ -452,7 +452,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       try {
-        const loaded = await loadExpandedValues(editor.document);
+        const loaded = await loadExpandedValuesForPreview(editor.document);
         const values = loaded.values;
         const text = editor.document.getText();
         const scope = findAppScopeAtLine(text, editor.selection.active.line);
@@ -2259,7 +2259,7 @@ async function renderEntityPreview(): Promise<void> {
   try {
     const document = await vscode.workspace.openTextDocument(state.documentUri);
     const documentText = document.getText();
-    const loaded = await loadExpandedValues(document);
+    const loaded = await loadExpandedValuesForPreview(document);
     const values = loaded.values;
     const previewContext = await resolvePreviewMenuAndEnv(
       document,
@@ -2975,6 +2975,28 @@ async function loadExpandedValues(document: vscode.TextDocument): Promise<{
     throw new Error("values file must be a YAML map");
   }
   return await expandValuesWithFileIncludes(parsed, document.uri.fsPath, async (filePath) => await readFile(filePath, "utf8"));
+}
+
+async function loadExpandedValuesForPreview(document: vscode.TextDocument): Promise<{
+  values: Record<string, unknown>;
+  includeDefinitions: IncludeDefinition[];
+  missingFiles: Array<{ rawPath: string; tried: string[] }>;
+}> {
+  try {
+    return await loadExpandedValues(document);
+  } catch (err) {
+    if (!happLspClient.isRunning()) {
+      throw err;
+    }
+    happLspBootstrapOutput.appendLine(
+      `[preview] local YAML parse fallback to happ model: ${extractErrorMessage(err)}`,
+    );
+    return {
+      values: {},
+      includeDefinitions: [],
+      missingFiles: [],
+    };
+  }
 }
 
 async function provideDefinition(

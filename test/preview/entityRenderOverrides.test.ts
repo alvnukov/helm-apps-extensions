@@ -140,6 +140,23 @@ test("buildManifestEntityIsolationSetValues returns minimal set values", () => {
   ]);
 });
 
+test("buildManifestEntityIsolationSetValues falls back to target=true when yaml is invalid", () => {
+  const source = "apps-stateless:\n  app-1: {{\n";
+  const setValues = buildManifestEntityIsolationSetValues(source, "apps-stateless", "app-1");
+  assert.deepEqual(setValues, ["apps-stateless.app-1.enabled=true"]);
+});
+
+test("buildManifestEntityIsolationSetValues falls back to target=true when app is absent in current file", () => {
+  const source = [
+    "apps-stateless:",
+    "  app-2:",
+    "    enabled: false",
+    "",
+  ].join("\n");
+  const setValues = buildManifestEntityIsolationSetValues(source, "apps-stateless", "app-1");
+  assert.deepEqual(setValues, ["apps-stateless.app-1.enabled=true"]);
+});
+
 test("buildManifestEntityIsolationOverrides returns null when target app is missing", () => {
   const source = "apps-stateless:\n  app-2:\n    enabled: false\n";
   const out = buildManifestEntityIsolationOverrides(source, "apps-stateless", "app-1");

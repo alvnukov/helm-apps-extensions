@@ -72,15 +72,15 @@ export function buildManifestEntityIsolationSetValues(
   try {
     const parsed = YAML.parse(text) as unknown;
     if (!isMap(parsed)) {
-      return null;
+      return [buildEnabledSetValue(group, app, true)];
     }
     const model = buildEntityEnableOverrideModel(parsed, group, app);
     if (!model.targetFound) {
-      return null;
+      return [buildEnabledSetValue(group, app, true)];
     }
     return flattenEnableOverridesToSetValues(model.overrides);
   } catch {
-    return null;
+    return [buildEnabledSetValue(group, app, true)];
   }
 }
 
@@ -160,11 +160,15 @@ function flattenEnableOverridesToSetValues(overrides: Record<string, EnableOverr
   const setValues: string[] = [];
   for (const [groupName, groupOverrides] of Object.entries(overrides)) {
     for (const [appName, appOverride] of Object.entries(groupOverrides)) {
-      const keyPath = `${escapeHelmSetPathSegment(groupName)}.${escapeHelmSetPathSegment(appName)}.enabled`;
-      setValues.push(`${keyPath}=${appOverride.enabled ? "true" : "false"}`);
+      setValues.push(buildEnabledSetValue(groupName, appName, appOverride.enabled));
     }
   }
   return setValues;
+}
+
+function buildEnabledSetValue(group: string, app: string, enabled: boolean): string {
+  const keyPath = `${escapeHelmSetPathSegment(group)}.${escapeHelmSetPathSegment(app)}.enabled`;
+  return `${keyPath}=${enabled ? "true" : "false"}`;
 }
 
 function escapeHelmSetPathSegment(segment: string): string {
