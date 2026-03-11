@@ -27,6 +27,7 @@
     "onCommand:helm-apps.validateCurrentFile",
     "onCommand:helm-apps.revealValuesNode",
     "onCommand:helm-apps.extractToGlobalInclude",
+    "onCommand:helm-apps.optimizeValuesIncludes",
     "onCommand:helm-apps.safeRenameAppKey",
     "onCommand:helm-apps.previewResolvedEntity",
     "onCommand:helm-apps.goToIncludeDefinition",
@@ -69,6 +70,10 @@
       {
         "command": "helm-apps.extractToGlobalInclude",
         "title": "%cmd.extractToGlobalInclude.title%"
+      },
+      {
+        "command": "helm-apps.optimizeValuesIncludes",
+        "title": "%cmd.optimizeValuesIncludes.title%"
       },
       {
         "command": "helm-apps.safeRenameAppKey",
@@ -233,6 +238,11 @@
           "command": "helm-apps.extractToGlobalInclude",
           "when": "resourceLangId == yaml",
           "group": "navigation@50"
+        },
+        {
+          "command": "helm-apps.optimizeValuesIncludes",
+          "when": "helmApps.happOptimizeValuesIncludesAvailable && helmApps.languageDocument && resourceLangId == yaml",
+          "group": "navigation@50.1"
         },
         {
           "command": "helm-apps.safeRenameAppKey",

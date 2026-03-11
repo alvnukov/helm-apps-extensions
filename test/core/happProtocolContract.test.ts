@@ -12,6 +12,7 @@ type Contract = {
     resolveEntity?: string;
     renderEntityManifest?: string;
     getPreviewTheme?: string;
+    optimizeValuesIncludes?: string;
   };
 };
 
@@ -24,4 +25,5 @@ test("shared happ contract matches extension protocol constants", () => {
   assert.equal(contract.methods?.resolveEntity, HAPP_LSP_METHODS.resolveEntity);
   assert.equal(contract.methods?.renderEntityManifest, HAPP_LSP_METHODS.renderEntityManifest);
   assert.equal(contract.methods?.getPreviewTheme, HAPP_LSP_METHODS.getPreviewTheme);
+  assert.equal(contract.methods?.optimizeValuesIncludes, HAPP_LSP_METHODS.optimizeValuesIncludes);
 });

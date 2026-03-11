@@ -5,6 +5,7 @@
   "cmd.validateCurrentFile.title": "Проверить текущий values.yaml",
   "cmd.revealValuesNode.title": "Показать узел в структуре values",
   "cmd.extractToGlobalInclude.title": "Вынести поле в global._includes",
+  "cmd.optimizeValuesIncludes.title": "Оптимизировать values в include-профили (happ)",
   "cmd.safeRenameAppKey.title": "Переименовать ключ приложения (безопасно)",
   "cmd.previewResolvedEntity.title": "Открыть предпросмотр сущности",
   "cmd.goToIncludeDefinition.title": "Перейти к определению include-профиля",

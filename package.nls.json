@@ -5,6 +5,7 @@
   "cmd.validateCurrentFile.title": "Validate Current values.yaml",
   "cmd.revealValuesNode.title": "Reveal Values Node",
   "cmd.extractToGlobalInclude.title": "Extract Field to global._includes",
+  "cmd.optimizeValuesIncludes.title": "Optimize values into include profiles (happ)",
   "cmd.safeRenameAppKey.title": "Rename App Key (Safe)",
   "cmd.previewResolvedEntity.title": "Open Entity Preview",
   "cmd.goToIncludeDefinition.title": "Go to Include Definition",

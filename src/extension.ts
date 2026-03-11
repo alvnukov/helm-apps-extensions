@@ -28,6 +28,7 @@ import { ValuesStructureProvider } from "./structure/valuesTreeProvider";
 import { HelmAppsWorkbenchActionsProvider } from "./structure/workbenchActionsProvider";
 import { buildStarterChartFiles, isValidChartVersion, sanitizeChartName } from "./scaffold/chartScaffold";
 import { DEFAULT_HAPP_LSP_ARGS, HappLspClient, type HappPreviewTheme, type LanguageMode } from "./lsp/client";
+import { HAPP_LSP_METHODS } from "./core/happProtocol";
 import { validateUnexpectedNativeLists } from "./validator/listPolicy";
 import {
   BUILTIN_GROUP_TYPES,
@@ -67,6 +68,8 @@ let previewThemeCache: HappPreviewTheme | null = null;
 let previewThemeFetchFailed = false;
 let templateAssistUnavailable = false;
 const INCLUDE_FILE_CACHE_TTL_MS = 2000;
+const HAPP_OPTIMIZE_VALUES_CONTEXT_KEY = "helmApps.happOptimizeValuesIncludesAvailable";
+const HELM_APPS_LANGUAGE_DOCUMENT_CONTEXT_KEY = "helmApps.languageDocument";
 
 type JsonSchema = {
   $ref?: string;
@@ -246,6 +249,8 @@ const LIBRARY_SETTINGS: LibrarySettingDef[] = [
 
 export function activate(context: vscode.ExtensionContext): void {
   void happLspClient.setAvailableContext(false);
+  void setHappOptimizeValuesContext(false);
+  void setHelmAppsLanguageDocumentContext(false);
   void applyInsertTemplateContextState(false, new Set<string>());
   context.subscriptions.push(happLspBootstrapOutput);
   context.subscriptions.push(listPolicyDiagnostics);
@@ -264,6 +269,7 @@ export function activate(context: vscode.ExtensionContext): void {
       valuesStructure.setDocument(editor?.document);
       void refreshListPolicyDiagnosticsForDocument(editor?.document);
       scheduleInsertTemplateContextRefresh(editor, 10);
+      void refreshHelmAppsLanguageDocumentContext(editor);
     }),
   );
   context.subscriptions.push(
@@ -284,6 +290,7 @@ export function activate(context: vscode.ExtensionContext): void {
       scheduleEntityPreviewRefreshFor(event.document, 90);
       void refreshListPolicyDiagnosticsForDocument(event.document);
       scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 80);
+      void refreshHelmAppsLanguageDocumentContext(vscode.window.activeTextEditor);
     }),
   );
   context.subscriptions.push(
@@ -295,6 +302,7 @@ export function activate(context: vscode.ExtensionContext): void {
       scheduleEntityPreviewRefreshFor(document, 0);
       void refreshListPolicyDiagnosticsForDocument(document);
       scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 80);
+      void refreshHelmAppsLanguageDocumentContext(vscode.window.activeTextEditor);
     }),
   );
   context.subscriptions.push(
@@ -511,6 +519,79 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("helm-apps.optimizeValuesIncludes", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      if (!(await isHelmAppsLanguageDocument(editor.document))) {
+        void vscode.window.showWarningMessage(
+          t(
+            "Open helm-apps values/include YAML to optimize include profiles.",
+            "Откройте YAML-файл values/include helm-apps для оптимизации include-профилей.",
+          ),
+        );
+        return;
+      }
+      if (!happLspClient.isRunning()) {
+        void vscode.window.showWarningMessage(
+          t(
+            "happ LSP is unavailable. Include optimization requires happ.",
+            "happ LSP недоступен. Оптимизация include-профилей требует happ.",
+          ),
+        );
+        return;
+      }
+      if (!happLspClient.advertisesMethod(HAPP_LSP_METHODS.optimizeValuesIncludes)) {
+        void vscode.window.showWarningMessage(
+          t(
+            "Current happ binary does not support include optimization method. Update happ.",
+            "Текущий бинарник happ не поддерживает метод оптимизации include. Обновите happ.",
+          ),
+        );
+        return;
+      }
+      const currentText = editor.document.getText();
+      try {
+        const result = await happLspClient.optimizeValuesIncludes({
+          uri: editor.document.uri.toString(),
+          text: currentText,
+          minProfileBytes: 24,
+        });
+        if (!result.changed) {
+          void vscode.window.showInformationMessage(
+            t(
+              "No shared fragments found for include optimization.",
+              "Общие фрагменты для оптимизации include-профилей не найдены.",
+            ),
+          );
+          return;
+        }
+        const fullRange = new vscode.Range(
+          editor.document.positionAt(0),
+          editor.document.positionAt(currentText.length),
+        );
+        const applied = await editor.edit((builder) => {
+          builder.replace(fullRange, result.optimizedText);
+        });
+        if (!applied) {
+          throw new Error("unable to apply optimized values into editor");
+        }
+        void vscode.window.showInformationMessage(
+          t(
+            `Optimized values: added ${result.profilesAdded} include profile(s).`,
+            `Оптимизация values завершена: добавлено include-профилей: ${result.profilesAdded}.`,
+          ),
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `${t("helm-apps include optimization failed", "Оптимизация include-профилей helm-apps не удалась")}: ${extractErrorMessage(err)}`,
+        );
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.safeRenameAppKey", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -611,6 +692,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void configureSchema(context, true);
   valuesStructure.setDocument(vscode.window.activeTextEditor?.document);
+  void refreshHelmAppsLanguageDocumentContext(vscode.window.activeTextEditor);
   scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 0);
   for (const document of vscode.workspace.textDocuments) {
     void refreshListPolicyDiagnosticsForDocument(document);
@@ -625,6 +707,7 @@ export function deactivate(): Thenable<void> | void {
 async function initializeLanguageFeatures(context: vscode.ExtensionContext): Promise<void> {
   resetPreviewThemeState();
   templateAssistUnavailable = false;
+  await setHappOptimizeValuesContext(false);
   const cfg = getExtensionConfig();
   const mode = cfg.get<LanguageMode>("languageServerMode", "happ");
   const devHappPathOverride = await resolveDevHappPathOverride(context);
@@ -637,6 +720,7 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
   if (mode === "fallback") {
     happLspBootstrapOutput.appendLine("languageServerMode=fallback; stopping happ client");
     await happLspClient.stop();
+    await setHappOptimizeValuesContext(false);
     applyLightFallbackMode();
     return;
   }
@@ -685,6 +769,7 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
     happLspBootstrapOutput.appendLine(
       `started: ${candidatePath}; fullLanguageSupport=${result.fullLanguageSupport ? "true" : "false"}`,
     );
+    await setHappOptimizeValuesContext(happLspClient.advertisesMethod(HAPP_LSP_METHODS.optimizeValuesIncludes));
     if (candidatePath !== happPath) {
       void vscode.window.showInformationMessage(
         t(
@@ -711,11 +796,29 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
       ),
     );
   }
+  await setHappOptimizeValuesContext(false);
   applyLightFallbackMode();
 }
 
 function applyLightFallbackMode(): void {
   // Keep extension-side fallback intentionally lightweight when happ is unavailable.
+}
+
+async function setHappOptimizeValuesContext(available: boolean): Promise<void> {
+  await vscode.commands.executeCommand("setContext", HAPP_OPTIMIZE_VALUES_CONTEXT_KEY, available);
+}
+
+async function setHelmAppsLanguageDocumentContext(available: boolean): Promise<void> {
+  await vscode.commands.executeCommand("setContext", HELM_APPS_LANGUAGE_DOCUMENT_CONTEXT_KEY, available);
+}
+
+async function refreshHelmAppsLanguageDocumentContext(editor: vscode.TextEditor | undefined): Promise<void> {
+  if (!editor) {
+    await setHelmAppsLanguageDocumentContext(false);
+    return;
+  }
+  const available = await isHelmAppsLanguageDocument(editor.document);
+  await setHelmAppsLanguageDocumentContext(available);
 }
 
 function resetPreviewThemeState(): void {

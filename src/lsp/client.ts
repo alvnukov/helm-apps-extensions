@@ -14,6 +14,8 @@ import {
   HAPP_LSP_METHODS,
   ListEntitiesParams,
   ListEntitiesResult,
+  OptimizeValuesIncludesParams,
+  OptimizeValuesIncludesResult,
   ResolveEntityParams,
   ResolveEntityResult,
   RenderEntityManifestParams,
@@ -29,6 +31,8 @@ export type {
   HappPreviewTheme,
   ListEntitiesParams,
   ListEntitiesResult,
+  OptimizeValuesIncludesParams,
+  OptimizeValuesIncludesResult,
   ResolveEntityParams,
   ResolveEntityResult,
   RenderEntityManifestParams,
@@ -156,6 +160,10 @@ export class HappLspClient {
 
   isRunning(): boolean {
     return this.client !== undefined;
+  }
+
+  advertisesMethod(method: string): boolean {
+    return this.client !== undefined && this.customMethods.has(method);
   }
 
   async listEntities(
@@ -291,6 +299,34 @@ export class HappLspClient {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger?.appendLine(`[client] templateAssist failed: ${message}`);
+      throw new Error(message);
+    }
+  }
+
+  async optimizeValuesIncludes(
+    params: OptimizeValuesIncludesParams,
+  ): Promise<OptimizeValuesIncludesResult> {
+    const active = this.client;
+    if (!active) {
+      throw new Error("happ LSP client is not running");
+    }
+    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.optimizeValuesIncludes)) {
+      this.logger?.appendLine("[client] optimizeValuesIncludes unavailable (method not advertised by server)");
+      throw new Error("happ LSP server does not support values include optimization (happ/optimizeValuesIncludes)");
+    }
+    try {
+      const result = await active.sendRequest<OptimizeValuesIncludesResult>(
+        HAPP_LSP_METHODS.optimizeValuesIncludes,
+        {
+          uri: params.uri,
+          text: params.text,
+          minProfileBytes: params.minProfileBytes,
+        },
+      );
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger?.appendLine(`[client] optimizeValuesIncludes failed: ${message}`);
       throw new Error(message);
     }
   }

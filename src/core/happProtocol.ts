@@ -4,6 +4,7 @@ export const HAPP_LSP_METHODS = {
   renderEntityManifest: "happ/renderEntityManifest",
   getPreviewTheme: "happ/getPreviewTheme",
   templateAssist: "happ/templateAssist",
+  optimizeValuesIncludes: "happ/optimizeValuesIncludes",
 } as const;
 
 export const DEFAULT_HAPP_LSP_ARGS = ["lsp"];
@@ -86,6 +87,18 @@ export interface TemplateAssistCompletion {
 export interface TemplateAssistResult {
   insideTemplate: boolean;
   completions: TemplateAssistCompletion[];
+}
+
+export interface OptimizeValuesIncludesParams {
+  uri?: string;
+  text?: string;
+  minProfileBytes?: number;
+}
+
+export interface OptimizeValuesIncludesResult {
+  optimizedText: string;
+  profilesAdded: number;
+  changed: boolean;
 }
 
 export interface HappPreviewTheme {

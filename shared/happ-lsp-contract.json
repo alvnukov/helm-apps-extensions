@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "transport": "stdio-jsonrpc",
   "entrypoint": {
     "command": "happ",
@@ -11,7 +11,8 @@
   "methods": {
     "resolveEntity": "happ/resolveEntity",
     "renderEntityManifest": "happ/renderEntityManifest",
-    "getPreviewTheme": "happ/getPreviewTheme"
+    "getPreviewTheme": "happ/getPreviewTheme",
+    "optimizeValuesIncludes": "happ/optimizeValuesIncludes"
   },
   "renderEntityManifest": {
     "request": {
@@ -31,6 +32,18 @@
         "literals": "string[]",
         "regexes": "string[]"
       }
+    }
+  },
+  "optimizeValuesIncludes": {
+    "request": {
+      "uri": "string?",
+      "text": "string?",
+      "minProfileBytes": "number?"
+    },
+    "response": {
+      "optimizedText": "string",
+      "profilesAdded": "number",
+      "changed": "boolean"
     }
   }
 }
