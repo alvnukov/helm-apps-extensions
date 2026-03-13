@@ -211,6 +211,7 @@ export class HappLspClient {
           group: params.group,
           app: params.app,
           env: params.env,
+          renderer: params.renderer,
           applyIncludes: params.applyIncludes,
           applyEnvResolution: params.applyEnvResolution,
         },

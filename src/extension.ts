@@ -31,6 +31,7 @@ import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "
 import { discoverEnvironments, findAppScopeAtLine, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
 import {
   buildManifestEntityIsolationSetValues,
+  buildManifestEntityIsolationSetValuesFromEnabledEntities,
   forceEntityEnabled,
   withManifestRenderEntityEnabled,
 } from "./preview/entityRenderOverrides";
@@ -88,6 +89,7 @@ let previewMessageSubscription: vscode.Disposable | undefined;
 let entityPreviewState: EntityPreviewState | undefined;
 let previewRenderTimer: NodeJS.Timeout | undefined;
 let previewRenderVersion = 0;
+let lastPreviewMenuModel: PreviewEntityMenuModel | undefined;
 const manifestPreviewCache = new Map<string, string>();
 const manifestPreviewInFlight = new Set<string>();
 const MANIFEST_PREVIEW_CACHE_LIMIT = 24;
@@ -2351,6 +2353,7 @@ function showEntityPreview(
       previewMessageSubscription?.dispose();
       previewMessageSubscription = undefined;
       entityPreviewState = undefined;
+      lastPreviewMenuModel = undefined;
       previewPanel = undefined;
     });
   } else {
@@ -2435,6 +2438,7 @@ async function renderEntityPreview(): Promise<void> {
     }
     state.group = menuModel.selectedGroup;
     state.app = menuModel.selectedApp;
+    lastPreviewMenuModel = menuModel;
     if (state.options.env.trim().length === 0 && previewContext.defaultEnv.trim().length > 0) {
       state.options.env = previewContext.defaultEnv.trim();
     }
@@ -2457,7 +2461,11 @@ async function renderEntityPreview(): Promise<void> {
       if (cached) {
         renderText = cached;
       } else {
-        renderText = await renderManifest(document, documentText, state);
+        renderText = await renderManifest(
+          document,
+          documentText,
+          state,
+        );
         cacheManifestPreview(cacheKey, renderText);
       }
     }
@@ -2484,6 +2492,31 @@ async function renderEntityPreview(): Promise<void> {
     if (!previewPanel || previewPanel !== panel || !entityPreviewState || entityPreviewState !== state || renderId !== previewRenderVersion) {
       return;
     }
+    let fallbackMenuModel = lastPreviewMenuModel;
+    if (!fallbackMenuModel || fallbackMenuModel.groups.length === 0) {
+      try {
+        const document = await vscode.workspace.openTextDocument(state.documentUri);
+        const documentText = document.getText();
+        const loaded = await loadExpandedValuesForPreview(document);
+        const values = loaded.values;
+        const previewContext = await resolvePreviewMenuAndEnv(
+          document,
+          documentText,
+          values,
+          state.group,
+          state.app,
+          state.options.env,
+        );
+        fallbackMenuModel = previewContext.menuModel;
+      } catch {
+        // keep empty fallback when menu model cannot be rebuilt
+      }
+    }
+    if (fallbackMenuModel && fallbackMenuModel.groups.length > 0) {
+      state.group = fallbackMenuModel.selectedGroup;
+      state.app = fallbackMenuModel.selectedApp;
+      lastPreviewMenuModel = fallbackMenuModel;
+    }
     const message = extractErrorMessage(err);
     const renderText = state.options.renderMode === "manifest"
       ? formatManifestPreviewError(err, {
@@ -2503,11 +2536,13 @@ async function renderEntityPreview(): Promise<void> {
       { literals: [state.options.env], regexes: [] },
       state.options,
       [],
-      {
-        groups: [],
-        selectedGroup: state.group,
-        selectedApp: state.app,
-      },
+      fallbackMenuModel && fallbackMenuModel.groups.length > 0
+        ? fallbackMenuModel
+        : {
+          groups: [],
+          selectedGroup: state.group,
+          selectedApp: state.app,
+        },
       DEFAULT_PREVIEW_THEME,
     );
   }
@@ -2570,13 +2605,13 @@ async function renderManifestFromHappLsp(
   documentText: string,
   state: EntityPreviewState,
 ): Promise<string> {
-  const requestText = withManifestRenderEntityEnabled(documentText, state.group, state.app);
   const result = await happLspClient.renderEntityManifest({
     uri: document.uri.toString(),
-    text: requestText,
+    text: documentText,
     group: state.group,
     app: state.app,
     env: state.options.env,
+    renderer: state.options.manifestBackend,
     applyIncludes: state.options.applyIncludes,
     applyEnvResolution: state.options.applyEnvResolution,
   });
@@ -2592,15 +2627,7 @@ async function renderManifest(
   documentText: string,
   state: EntityPreviewState,
 ): Promise<string> {
-  switch (state.options.manifestBackend) {
-    case "helm":
-      return await renderManifestFromHelmOrWerf(document, documentText, state, "helm");
-    case "werf":
-      return await renderManifestFromHelmOrWerf(document, documentText, state, "werf");
-    case "fast":
-    default:
-      return await renderManifestFromHappLsp(document, documentText, state);
-  }
+  return await renderManifestFromHappLsp(document, documentText, state);
 }
 
 async function renderManifestFromHelmOrWerf(
@@ -2608,6 +2635,7 @@ async function renderManifestFromHelmOrWerf(
   documentText: string,
   state: EntityPreviewState,
   backend: "helm" | "werf",
+  resolvedEnabledEntities?: ReadonlyArray<{ group: string; app: string }>,
 ): Promise<string> {
   const chartYaml = await findNearestChartYaml(document.uri.fsPath);
   if (!chartYaml) {
@@ -2621,11 +2649,17 @@ async function renderManifestFromHelmOrWerf(
 
   try {
     const valuesFiles = await resolveManifestValuesFiles(document, chartDir);
-    const isolationSetValues = buildManifestEntityIsolationSetValues(
-      documentText,
-      state.group,
-      state.app,
-    );
+    const isolationSetValues = resolvedEnabledEntities && resolvedEnabledEntities.length > 0
+      ? buildManifestEntityIsolationSetValuesFromEnabledEntities(
+        resolvedEnabledEntities,
+        state.group,
+        state.app,
+      )
+      : buildManifestEntityIsolationSetValues(
+        documentText,
+        state.group,
+        state.app,
+      );
     if (!isolationSetValues) {
       throw new Error(`unable to isolate entity ${state.group}.${state.app} for manifest render`);
     }
@@ -2876,13 +2910,15 @@ async function resolvePreviewMenuAndEnv(
   menuModel: PreviewEntityMenuModel;
   envDiscovery: EnvironmentDiscovery;
   defaultEnv: string;
+  enabledEntities: Array<{ group: string; app: string }>;
 }> {
   let menuModel = buildPreviewEntityMenuModel(values, selectedGroup, selectedApp);
   let envDiscovery = discoverEnvironments(values);
   let defaultEnv = detectDefaultEnv(values, envDiscovery);
+  let enabledEntities: Array<{ group: string; app: string }> = [];
 
   if (!happLspClient.isRunning()) {
-    return { menuModel, envDiscovery, defaultEnv };
+    return { menuModel, envDiscovery, defaultEnv, enabledEntities };
   }
 
   try {
@@ -2905,6 +2941,16 @@ async function resolvePreviewMenuAndEnv(
       literals: [...listed.envDiscovery.literals],
       regexes: [...listed.envDiscovery.regexes],
     };
+    enabledEntities = Array.isArray(listed.enabledEntities)
+      ? listed.enabledEntities
+        .filter((entity): entity is { group: string; app: string } =>
+          !!entity
+          && typeof entity.group === "string"
+          && entity.group.trim().length > 0
+          && typeof entity.app === "string"
+          && entity.app.trim().length > 0)
+        .map((entity) => ({ group: entity.group.trim(), app: entity.app.trim() }))
+      : [];
     if (listed.defaultEnv.trim().length > 0) {
       defaultEnv = listed.defaultEnv.trim();
     }
@@ -2914,7 +2960,7 @@ async function resolvePreviewMenuAndEnv(
     );
   }
 
-  return { menuModel, envDiscovery, defaultEnv };
+  return { menuModel, envDiscovery, defaultEnv, enabledEntities };
 }
 
 async function loadExpandedValues(document: vscode.TextDocument): Promise<{

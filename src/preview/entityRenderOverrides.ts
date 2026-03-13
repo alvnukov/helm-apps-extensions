@@ -1,5 +1,10 @@
 import * as YAML from "yaml";
 
+export interface EnabledEntityRef {
+  group: string;
+  app: string;
+}
+
 export function forceEntityEnabled(entity: unknown): unknown {
   if (!isMap(entity)) {
     return entity;
@@ -82,6 +87,31 @@ export function buildManifestEntityIsolationSetValues(
   } catch {
     return [buildEnabledSetValue(group, app, true)];
   }
+}
+
+export function buildManifestEntityIsolationSetValuesFromEnabledEntities(
+  enabledEntities: readonly EnabledEntityRef[],
+  group: string,
+  app: string,
+): string[] {
+  const setValues: string[] = [buildEnabledSetValue(group, app, true)];
+  const seen = new Set<string>([`${group}\u0000${app}`]);
+
+  for (const entity of enabledEntities) {
+    const groupName = entity.group.trim();
+    const appName = entity.app.trim();
+    if (groupName.length === 0 || appName.length === 0) {
+      continue;
+    }
+    const key = `${groupName}\u0000${appName}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    setValues.push(buildEnabledSetValue(groupName, appName, false));
+  }
+
+  return setValues;
 }
 
 type EnableOverrideGroup = Record<string, { enabled: boolean }>;

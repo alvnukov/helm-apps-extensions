@@ -4,6 +4,7 @@ import * as YAML from "yaml";
 import {
   buildManifestEntityIsolationOverrides,
   buildManifestEntityIsolationSetValues,
+  buildManifestEntityIsolationSetValuesFromEnabledEntities,
   forceEntityEnabled,
   withManifestRenderEntityEnabled,
 } from "../../src/preview/entityRenderOverrides";
@@ -155,6 +156,23 @@ test("buildManifestEntityIsolationSetValues falls back to target=true when app i
   ].join("\n");
   const setValues = buildManifestEntityIsolationSetValues(source, "apps-stateless", "app-1");
   assert.deepEqual(setValues, ["apps-stateless.app-1.enabled=true"]);
+});
+
+test("buildManifestEntityIsolationSetValuesFromEnabledEntities disables only resolved active siblings", () => {
+  const setValues = buildManifestEntityIsolationSetValuesFromEnabledEntities([
+    { group: "apps-stateless", app: "app-2" },
+    { group: "apps-stateless", app: "app-3" },
+    { group: "apps-services", app: "svc-1" },
+    { group: "apps-stateless", app: "app-1" },
+    { group: "apps-stateless", app: "app-2" },
+  ], "apps-stateless", "app-1");
+
+  assert.deepEqual(setValues, [
+    "apps-stateless.app-1.enabled=true",
+    "apps-stateless.app-2.enabled=false",
+    "apps-stateless.app-3.enabled=false",
+    "apps-services.svc-1.enabled=false",
+  ]);
 });
 
 test("buildManifestEntityIsolationOverrides returns null when target app is missing", () => {

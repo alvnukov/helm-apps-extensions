@@ -15,6 +15,7 @@ export interface RenderEntityManifestParams {
   group: string;
   app: string;
   env?: string;
+  renderer?: "fast" | "helm" | "werf";
   applyIncludes?: boolean;
   applyEnvResolution?: boolean;
 }
@@ -37,8 +38,14 @@ export interface PreviewEntityGroupModel {
   apps: string[];
 }
 
+export interface PreviewEnabledEntityModel {
+  group: string;
+  app: string;
+}
+
 export interface ListEntitiesResult {
   groups: PreviewEntityGroupModel[];
+  enabledEntities?: PreviewEnabledEntityModel[];
   defaultEnv: string;
   usedEnv: string;
   envDiscovery: EnvironmentDiscoveryModel;
