@@ -24,6 +24,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint GitHub Actions workflows
+        run: |
+          set -euo pipefail
+          bin_dir="${RUNNER_TEMP}/actionlint-bin"
+          mkdir -p "${bin_dir}"
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.11 "${bin_dir}"
+          "${bin_dir}/actionlint"
+
+      - name: Audit Node.js dependencies
+        run: |
+          set -euo pipefail
+          npm audit --audit-level=high --package-lock-only
+
       - name: Build extension
         run: npm run build
 
