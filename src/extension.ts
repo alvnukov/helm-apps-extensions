@@ -5143,6 +5143,10 @@ function renderPreviewHtml(
         text-align: left;
         cursor: pointer;
         transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
       }
       .entity-trigger:hover { border-color: ${ui.controlHoverBorder}; }
       .entity-trigger:focus {
@@ -5160,26 +5164,57 @@ function renderPreviewHtml(
         border: 1px solid var(--border);
         border-radius: 9px;
         box-shadow: var(--shadow-pop);
-        padding: 3px;
-        min-width: 260px;
+        width: min(620px, calc(100vw - 48px));
+        max-width: calc(100vw - 48px);
+        overflow: hidden;
       }
       .entity-menu {
-        min-width: 244px;
-        padding: 3px;
-        max-height: 260px;
+        min-width: 0;
+        padding: 4px;
         overflow: auto;
+        flex: 1 1 auto;
+        min-height: 0;
       }
-      .entity-submenu {
-        position: absolute;
-        top: 0;
-        left: calc(100% + 4px);
-        right: auto;
-        min-width: 240px;
+      .entity-trigger-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .entity-trigger-icon {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .entity-picker-search {
+        padding: 10px;
+        border-bottom: 1px solid var(--border);
         background: var(--surface-2);
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        box-shadow: var(--shadow-pop);
-        padding: 3px;
+      }
+      .entity-picker-search input {
+        font-size: 13px;
+      }
+      .entity-picker-grid {
+        display: grid;
+        grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+        height: 320px;
+        min-height: 320px;
+      }
+      .entity-pane {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .entity-pane + .entity-pane {
+        border-left: 1px solid var(--border);
+      }
+      .entity-pane-title {
+        padding: 10px 12px 8px;
+        font-size: 11px;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
       .entity-item {
         width: 100%;
@@ -5204,7 +5239,12 @@ function renderPreviewHtml(
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .entity-item-arrow { color: var(--muted); padding-left: 10px; font-size: 12px; }
+      .entity-item-meta {
+        color: var(--muted);
+        padding-left: 10px;
+        font-size: 11px;
+        flex: 0 0 auto;
+      }
       .entity-empty { font-size: 12px; color: var(--muted); padding: 6px 8px; }
       .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
       .warn { font-size: 11px; color: var(--danger); margin-top: 8px; }
@@ -5329,6 +5369,21 @@ function renderPreviewHtml(
         .entity-trigger { width: 100%; }
         .render { max-height: calc(100vh - 320px); }
       }
+      @media (max-width: 560px) {
+        .entity-popup {
+          width: 100%;
+          max-width: none;
+        }
+        .entity-picker-grid {
+          grid-template-columns: 1fr;
+          height: min(70vh, 520px);
+          min-height: 0;
+        }
+        .entity-pane + .entity-pane {
+          border-left: 0;
+          border-top: 1px solid var(--border);
+        }
+      }
     </style>
   </head>
   <body>
@@ -5340,10 +5395,24 @@ function renderPreviewHtml(
       <div class="bar">
         <div class="entity-control">
           <label for="entityTrigger">entity</label>
-          <button id="entityTrigger" type="button" class="entity-trigger" ${entityDisabled}>${escapeHtml(entityLabel)}</button>
+          <button id="entityTrigger" type="button" class="entity-trigger" ${entityDisabled}>
+            <span id="entityTriggerLabel" class="entity-trigger-label">${escapeHtml(entityLabel)}</span>
+            <span class="entity-trigger-icon">▾</span>
+          </button>
           <div id="entityPopup" class="entity-popup" hidden>
-            <div id="groupMenu" class="entity-menu"></div>
-            <div id="appMenu" class="entity-submenu" hidden></div>
+            <div class="entity-picker-search">
+              <input id="entitySearch" type="text" value="" placeholder="search group/app" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="entity-picker-grid">
+              <div class="entity-pane">
+                <div class="entity-pane-title">groups</div>
+                <div id="groupMenu" class="entity-menu"></div>
+              </div>
+              <div class="entity-pane">
+                <div class="entity-pane-title">apps</div>
+                <div id="appMenu" class="entity-menu"></div>
+              </div>
+            </div>
           </div>
         </div>
         <label>env
@@ -5376,12 +5445,15 @@ function renderPreviewHtml(
       const manifestBackendSelect = document.getElementById("manifestBackendSelect");
       const renderModeTabs = document.querySelectorAll(".mode-tab");
       const entityTrigger = document.getElementById("entityTrigger");
+      const entityTriggerLabel = document.getElementById("entityTriggerLabel");
       const entityPopup = document.getElementById("entityPopup");
+      const entitySearch = document.getElementById("entitySearch");
       const groupMenu = document.getElementById("groupMenu");
       const appMenu = document.getElementById("appMenu");
       let selectedGroup = menu.selectedGroup;
       let selectedApp = menu.selectedApp;
-      let submenuGroup = menu.selectedGroup;
+      let pickerGroup = menu.selectedGroup;
+      let pickerQuery = "";
       let selectedRenderMode = options.renderMode === "manifest" ? "manifest" : "values";
       let selectedManifestBackend = options.manifestBackend === "helm" || options.manifestBackend === "werf"
         ? options.manifestBackend
@@ -5451,10 +5523,9 @@ function renderPreviewHtml(
       updateRenderModeTabs();
       syncEnvSelectWithInput();
       normalizeSelection();
-      if (entityTrigger && entityPopup && groupMenu && appMenu) {
+      if (entityTrigger && entityPopup && groupMenu && appMenu && entitySearch instanceof HTMLInputElement) {
         updateEntityLabel();
-        renderGroupMenu();
-        renderAppMenu();
+        renderEntityPicker();
 
         entityTrigger.addEventListener("click", (event) => {
           event.preventDefault();
@@ -5471,6 +5542,25 @@ function renderPreviewHtml(
 
         entityPopup.addEventListener("click", (event) => {
           event.stopPropagation();
+        });
+        entitySearch.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        entitySearch.addEventListener("input", () => {
+          pickerQuery = entitySearch.value || "";
+          renderEntityPicker();
+        });
+        entitySearch.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            const visibleApps = getVisibleAppsForPickerGroup();
+            if (visibleApps.length === 1 && pickerGroup) {
+              selectedGroup = pickerGroup;
+              selectedApp = visibleApps[0];
+              updateEntityLabel();
+              closeEntityPopup();
+              emit();
+            }
+          }
         });
         document.addEventListener("click", closeEntityPopup);
         document.addEventListener("keydown", (event) => {
@@ -5493,20 +5583,22 @@ function renderPreviewHtml(
         } else if (!apps.includes(selectedApp)) {
           selectedApp = apps[0];
         }
-        if (!menu.groups.some((group) => group.name === submenuGroup)) {
-          submenuGroup = selectedGroup;
+        if (!menu.groups.some((group) => group.name === pickerGroup)) {
+          pickerGroup = selectedGroup;
         }
       }
 
       function openEntityPopup() {
-        if (!entityPopup || !appMenu) {
+        if (!entityPopup || !(entitySearch instanceof HTMLInputElement)) {
           return;
         }
-        submenuGroup = selectedGroup;
-        renderGroupMenu();
-        renderAppMenu();
+        pickerGroup = selectedGroup;
+        pickerQuery = "";
+        entitySearch.value = "";
+        renderEntityPicker();
         entityPopup.hidden = false;
-        appMenu.hidden = false;
+        entityTrigger?.setAttribute("aria-expanded", "true");
+        requestAnimationFrame(() => entitySearch.focus());
       }
 
       function closeEntityPopup() {
@@ -5514,17 +5606,63 @@ function renderPreviewHtml(
           return;
         }
         entityPopup.hidden = true;
+        entityTrigger?.setAttribute("aria-expanded", "false");
       }
 
       function updateEntityLabel() {
-        if (!entityTrigger) {
+        if (!entityTriggerLabel) {
           return;
         }
         if (!selectedGroup || !selectedApp) {
-          entityTrigger.textContent = "no entities";
+          entityTriggerLabel.textContent = "no entities";
           return;
         }
-        entityTrigger.textContent = selectedGroup + "." + selectedApp;
+        entityTriggerLabel.textContent = selectedGroup + " / " + selectedApp;
+      }
+
+      function renderEntityPicker() {
+        renderGroupMenu();
+        renderAppMenu();
+      }
+
+      function getFilteredGroups() {
+        const normalized = pickerQuery.trim().toLowerCase();
+        if (!normalized) {
+          return Array.isArray(menu.groups) ? menu.groups.map((group) => ({ name: group.name, apps: group.apps.slice() })) : [];
+        }
+        return (Array.isArray(menu.groups) ? menu.groups : [])
+          .map((group) => {
+            const groupMatch = group.name.toLowerCase().includes(normalized);
+            const apps = groupMatch
+              ? group.apps.slice()
+              : group.apps.filter((app) => app.toLowerCase().includes(normalized));
+            return {
+              name: group.name,
+              apps
+            };
+          })
+          .filter((group) => group.apps.length > 0);
+      }
+
+      function normalizePickerGroup(filteredGroups = getFilteredGroups()) {
+        if (filteredGroups.length === 0) {
+          pickerGroup = "";
+          return;
+        }
+        if (filteredGroups.some((group) => group.name === pickerGroup)) {
+          return;
+        }
+        if (filteredGroups.some((group) => group.name === selectedGroup)) {
+          pickerGroup = selectedGroup;
+          return;
+        }
+        pickerGroup = filteredGroups[0].name;
+      }
+
+      function getVisibleAppsForPickerGroup() {
+        const filteredGroups = getFilteredGroups();
+        normalizePickerGroup(filteredGroups);
+        return filteredGroups.find((group) => group.name === pickerGroup)?.apps ?? [];
       }
 
       function renderGroupMenu() {
@@ -5532,31 +5670,34 @@ function renderPreviewHtml(
           return;
         }
         groupMenu.innerHTML = "";
-        if (!Array.isArray(menu.groups) || menu.groups.length === 0) {
+        const filteredGroups = getFilteredGroups();
+        normalizePickerGroup(filteredGroups);
+        if (filteredGroups.length === 0) {
           groupMenu.innerHTML = '<div class="entity-empty">no groups</div>';
           return;
         }
 
-        for (const group of menu.groups) {
+        for (const group of filteredGroups) {
           const item = document.createElement("button");
           item.type = "button";
-          item.className = "entity-item" + (group.name === submenuGroup ? " active" : "");
+          item.className = "entity-item" + (group.name === pickerGroup ? " active" : "");
           const label = document.createElement("span");
           label.className = "entity-item-label";
           label.textContent = group.name;
-          const arrow = document.createElement("span");
-          arrow.className = "entity-item-arrow";
-          arrow.textContent = "›";
+          const meta = document.createElement("span");
+          meta.className = "entity-item-meta";
+          meta.textContent = String(group.apps.length);
           item.appendChild(label);
-          item.appendChild(arrow);
-          const setSubmenu = () => {
-            submenuGroup = group.name;
-            renderGroupMenu();
-            renderAppMenu();
-          };
-          item.addEventListener("mouseenter", setSubmenu);
-          item.addEventListener("click", setSubmenu);
+          item.appendChild(meta);
+          item.addEventListener("click", () => {
+            pickerGroup = group.name;
+            renderEntityPicker();
+          });
           groupMenu.appendChild(item);
+        }
+        const activeItem = groupMenu.querySelector(".entity-item.active");
+        if (activeItem instanceof HTMLElement) {
+          activeItem.scrollIntoView({ block: "nearest" });
         }
       }
 
@@ -5566,49 +5707,32 @@ function renderPreviewHtml(
         }
         appMenu.innerHTML = "";
 
-        const apps = menu.groups.find((group) => group.name === submenuGroup)?.apps ?? [];
+        const apps = getVisibleAppsForPickerGroup();
         if (apps.length === 0) {
           appMenu.innerHTML = '<div class="entity-empty">no apps</div>';
-          appMenu.hidden = false;
-          appMenu.style.left = "calc(100% + 4px)";
-          appMenu.style.right = "auto";
           return;
         }
-        appMenu.hidden = false;
-        const list = document.createElement("div");
-        list.className = "entity-menu";
         for (const app of apps) {
           const item = document.createElement("button");
           item.type = "button";
-          const isCurrent = submenuGroup === selectedGroup && app === selectedApp;
+          const isCurrent = pickerGroup === selectedGroup && app === selectedApp;
           item.className = "entity-item" + (isCurrent ? " active" : "");
           const label = document.createElement("span");
           label.className = "entity-item-label";
           label.textContent = app;
           item.appendChild(label);
           item.addEventListener("click", () => {
-            selectedGroup = submenuGroup;
+            selectedGroup = pickerGroup;
             selectedApp = app;
             updateEntityLabel();
             closeEntityPopup();
             emit();
           });
-          list.appendChild(item);
+          appMenu.appendChild(item);
         }
-        appMenu.appendChild(list);
-        const activeGroupItem = groupMenu?.querySelector(".entity-item.active");
-        if (activeGroupItem instanceof HTMLElement) {
-          appMenu.style.top = activeGroupItem.offsetTop + "px";
-        } else {
-          appMenu.style.top = "0";
-        }
-        appMenu.style.left = "calc(100% + 4px)";
-        appMenu.style.right = "auto";
-        const popupRect = entityPopup?.getBoundingClientRect();
-        const submenuRect = appMenu.getBoundingClientRect();
-        if (popupRect && submenuRect.right > window.innerWidth - 8) {
-          appMenu.style.left = "auto";
-          appMenu.style.right = "calc(100% + 4px)";
+        const activeItem = appMenu.querySelector(".entity-item.active");
+        if (activeItem instanceof HTMLElement) {
+          activeItem.scrollIntoView({ block: "nearest" });
         }
       }
 
