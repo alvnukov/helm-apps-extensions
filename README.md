@@ -31,7 +31,7 @@
 2. Убедиться, что `happ` доступен в `PATH` (или указать путь в `helm-apps.happPath`).
 3. Открыть chart с `values.yaml` в формате `helm-apps`.
 4. Выполнить команду `helm-apps: Configure YAML schema`.
-5. Выполнить `helm-apps: Preview resolved entity (with includes)` и проверить `values/manifest` preview.
+5. Выполнить `helm-apps: Open Entity Preview` и проверить вкладки `values/manifest`.
 
 ## Как это выглядит
 
@@ -56,7 +56,7 @@
 - много переключений между файлами.
 
 После:
-- открываете `Preview resolved entity`;
+- открываете `Open Entity Preview`;
 - сразу видите итоговую сущность и итоговый manifest;
 - быстрее находите, где ломается контракт.
 
@@ -67,8 +67,8 @@
 
 После:
 - `Go to include definition` на `_include`;
-- `Find usages` по include/app символу;
-- безопасное переименование через `Safe rename app key`.
+- `Find Symbol Usages` по include/app символу;
+- безопасное переименование через `Rename App Key (Safe)`.
 
 ### 3) Онбординг в новый chart
 
@@ -87,8 +87,8 @@
 | Schema auto-attach | Подключает `helm-apps` schema к `values*.yaml` |
 | Entity preview (`values/manifest`) | Показывает итог сущности с учетом include/env resolution |
 | Entity selector в preview | Переключение группа/app без закрытия окна preview |
-| Navigation | `Go to include definition`, `Find usages`, `Rename symbol`, `Go to definition` |
-| Refactor | `Extract app child to global include`, `Safe rename app key` |
+| Navigation | `Go to Include Definition`, `Find Symbol Usages`, `Rename App Key (Safe)`, `Go to Definition` |
+| Refactor | `Extract Field to global._includes`, `Rename App Key (Safe)` |
 | Visual structure | Дерево `helm-apps Values Structure` с переходом к ключу |
 | Library settings UI | Панель настройки `global.*` c применением в `values.yaml` |
 | Entity templates | Вставка шаблонов сущностей по группам |
@@ -100,23 +100,23 @@
 Основные команды в Command Palette (`Cmd/Ctrl+Shift+P`):
 
 - `helm-apps: Configure YAML schema`
-- `helm-apps: Validate current values.yaml`
-- `helm-apps: Preview resolved entity (with includes)`
+- `helm-apps: Validate Current values.yaml`
+- `helm-apps: Open Entity Preview`
 - `helm-apps: Go to include definition`
-- `helm-apps: Find symbol usages`
+- `helm-apps: Find Symbol Usages`
 - `helm-apps: Open dependency graph`
 - `helm-apps: Open library settings`
 - `helm-apps: Generate library settings help`
 - `helm-apps: Paste as helm-apps`
-- `helm-apps: Extract app child to global include`
-- `helm-apps: Safe rename app key`
+- `helm-apps: Extract Field to global._includes`
+- `helm-apps: Rename App Key (Safe)`
 
 ## Настройки
 
 - `helm-apps.languageServerMode`  
   `happ` (по умолчанию, рекомендуется) или `fallback`.
 - `helm-apps.happPath`  
-  Явный путь к бинарнику `happ`, если он не находится через `PATH`.
+  Явный путь к бинарнику `happ`, который используется и для `happ` LSP, и для CLI-команд расширения.
 - `helm-apps.happLspArgs`  
   Аргументы запуска LSP (`["lsp"]` по умолчанию).
 - `helm-apps.previewManifestBackend`  

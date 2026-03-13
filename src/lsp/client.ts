@@ -10,19 +10,20 @@ import {
 import {
   collectCustomMethods,
   DEFAULT_HAPP_LSP_ARGS,
-  HappPreviewTheme,
   HAPP_LSP_METHODS,
-  ListEntitiesParams,
-  ListEntitiesResult,
-  OptimizeValuesIncludesParams,
-  OptimizeValuesIncludesResult,
-  ResolveEntityParams,
-  ResolveEntityResult,
-  RenderEntityManifestParams,
-  RenderEntityManifestResult,
-  TemplateAssistParams,
-  TemplateAssistResult,
+  type HappPreviewTheme,
+  type ListEntitiesParams,
+  type ListEntitiesResult,
+  type OptimizeValuesIncludesParams,
+  type OptimizeValuesIncludesResult,
+  type ResolveEntityParams,
+  type ResolveEntityResult,
+  type RenderEntityManifestParams,
+  type RenderEntityManifestResult,
+  type TemplateAssistParams,
+  type TemplateAssistResult,
 } from "../core/happProtocol";
+import { classifyMethodCallGuard, errorMessageFromUnknown, withParentPidArg } from "./clientFlow";
 
 export const HAPP_AVAILABLE_CONTEXT_KEY = "helmApps.happAvailable";
 export type LanguageMode = "happ" | "fallback";
@@ -80,7 +81,7 @@ export class HappLspClient {
       errorHandler: {
         error: (error, message, count) => {
           this.logger?.appendLine(
-            `[client] error message=${message ?? "<none>"} count=${count} err=${error?.message ?? String(error)}`,
+            `[client] error message=${message ?? "<none>"} count=${count} err=${errorMessageFromUnknown(error)}`,
           );
           return { action: ErrorAction.Shutdown };
         },
@@ -121,7 +122,7 @@ export class HappLspClient {
         fullLanguageSupport: experimental?.helmAppsFullLanguageFeatures === true,
       };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorMessage = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] start failed: ${errorMessage}`);
       try {
         await client.stop();
@@ -169,14 +170,11 @@ export class HappLspClient {
   async listEntities(
     params: ListEntitiesParams,
   ): Promise<ListEntitiesResult> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.listEntities)) {
-      this.logger?.appendLine("[client] listEntities unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support entity listing (happ/listEntities)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.listEntities,
+      "[client] listEntities unavailable (method not advertised by server)",
+      "happ LSP server does not support entity listing (happ/listEntities)",
+    );
     try {
       const result = await active.sendRequest<ListEntitiesResult>(
         HAPP_LSP_METHODS.listEntities,
@@ -190,7 +188,7 @@ export class HappLspClient {
       );
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] listEntities failed: ${message}`);
       throw new Error(message);
     }
@@ -199,14 +197,11 @@ export class HappLspClient {
   async renderEntityManifest(
     params: RenderEntityManifestParams,
   ): Promise<RenderEntityManifestResult> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.renderEntityManifest)) {
-      this.logger?.appendLine("[client] renderEntityManifest unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support manifest preview (happ/renderEntityManifest)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.renderEntityManifest,
+      "[client] renderEntityManifest unavailable (method not advertised by server)",
+      "happ LSP server does not support manifest preview (happ/renderEntityManifest)",
+    );
     try {
       const result = await active.sendRequest<RenderEntityManifestResult>(
         HAPP_LSP_METHODS.renderEntityManifest,
@@ -222,7 +217,7 @@ export class HappLspClient {
       );
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] renderEntityManifest failed: ${message}`);
       throw new Error(message);
     }
@@ -231,14 +226,11 @@ export class HappLspClient {
   async resolveEntity(
     params: ResolveEntityParams,
   ): Promise<ResolveEntityResult> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.resolveEntity)) {
-      this.logger?.appendLine("[client] resolveEntity unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support values entity resolve (happ/resolveEntity)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.resolveEntity,
+      "[client] resolveEntity unavailable (method not advertised by server)",
+      "happ LSP server does not support values entity resolve (happ/resolveEntity)",
+    );
     try {
       const result = await active.sendRequest<ResolveEntityResult>(
         HAPP_LSP_METHODS.resolveEntity,
@@ -254,40 +246,34 @@ export class HappLspClient {
       );
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] resolveEntity failed: ${message}`);
       throw new Error(message);
     }
   }
 
   async getPreviewTheme(): Promise<HappPreviewTheme> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.getPreviewTheme)) {
-      this.logger?.appendLine("[client] getPreviewTheme unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support preview theme request (happ/getPreviewTheme)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.getPreviewTheme,
+      "[client] getPreviewTheme unavailable (method not advertised by server)",
+      "happ LSP server does not support preview theme request (happ/getPreviewTheme)",
+    );
     try {
       const result = await active.sendRequest<HappPreviewTheme>(HAPP_LSP_METHODS.getPreviewTheme, {});
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] getPreviewTheme failed: ${message}`);
       throw new Error(message);
     }
   }
 
   async templateAssist(params: TemplateAssistParams): Promise<TemplateAssistResult> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.templateAssist)) {
-      this.logger?.appendLine("[client] templateAssist unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support template assist request (happ/templateAssist)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.templateAssist,
+      "[client] templateAssist unavailable (method not advertised by server)",
+      "happ LSP server does not support template assist request (happ/templateAssist)",
+    );
     try {
       const result = await active.sendRequest<TemplateAssistResult>(HAPP_LSP_METHODS.templateAssist, {
         uri: params.uri,
@@ -297,7 +283,7 @@ export class HappLspClient {
       });
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] templateAssist failed: ${message}`);
       throw new Error(message);
     }
@@ -306,14 +292,11 @@ export class HappLspClient {
   async optimizeValuesIncludes(
     params: OptimizeValuesIncludesParams,
   ): Promise<OptimizeValuesIncludesResult> {
-    const active = this.client;
-    if (!active) {
-      throw new Error("happ LSP client is not running");
-    }
-    if (this.customMethods.size > 0 && !this.customMethods.has(HAPP_LSP_METHODS.optimizeValuesIncludes)) {
-      this.logger?.appendLine("[client] optimizeValuesIncludes unavailable (method not advertised by server)");
-      throw new Error("happ LSP server does not support values include optimization (happ/optimizeValuesIncludes)");
-    }
+    const active = this.requireActiveClientForMethod(
+      HAPP_LSP_METHODS.optimizeValuesIncludes,
+      "[client] optimizeValuesIncludes unavailable (method not advertised by server)",
+      "happ LSP server does not support values include optimization (happ/optimizeValuesIncludes)",
+    );
     try {
       const result = await active.sendRequest<OptimizeValuesIncludesResult>(
         HAPP_LSP_METHODS.optimizeValuesIncludes,
@@ -325,21 +308,29 @@ export class HappLspClient {
       );
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageFromUnknown(err);
       this.logger?.appendLine(`[client] optimizeValuesIncludes failed: ${message}`);
       throw new Error(message);
     }
   }
 
+  private requireActiveClientForMethod(
+    method: string,
+    unavailableLogMessage: string,
+    unsupportedErrorMessage: string,
+  ): LanguageClient {
+    const guard = classifyMethodCallGuard(this.client !== undefined, this.customMethods, method);
+    if (guard === "clientNotRunning") {
+      throw new Error("happ LSP client is not running");
+    }
+    if (guard === "methodUnavailable") {
+      this.logger?.appendLine(unavailableLogMessage);
+      throw new Error(unsupportedErrorMessage);
+    }
+    return this.client as LanguageClient;
+  }
+
   async setAvailableContext(available: boolean): Promise<void> {
     await vscode.commands.executeCommand("setContext", HAPP_AVAILABLE_CONTEXT_KEY, available);
   }
-}
-
-function withParentPidArg(args: readonly string[]): string[] {
-  const hasParentPid = args.some((arg) => arg === "--parent-pid" || arg.startsWith("--parent-pid="));
-  if (hasParentPid) {
-    return [...args];
-  }
-  return [...args, `--parent-pid=${process.pid}`];
 }

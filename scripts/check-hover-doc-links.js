@@ -25,9 +25,9 @@ if (errors.length > 0) {
   throw new Error(`hover docs validation failed:\n- ${errors.join("\n- ")}`);
 }
 if (warnings.length > 0) {
-  // eslint-disable-next-line no-console
+   
   console.warn(`hover docs warnings:\n- ${warnings.join("\n- ")}`);
 }
 
-// eslint-disable-next-line no-console
+ 
 console.log(`hover docs links OK (${links.length})`);

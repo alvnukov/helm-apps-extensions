@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
@@ -14,6 +14,19 @@ import { compareSemver, resolveHelmRepositoryURL } from "./library/repository";
 import { extractIncludeProfileBlock, extractLocalIncludeBlock, trimPreview } from "./hover/includeHover";
 import { buildDependencyGraphModel } from "./language/dependencyGraph";
 import { buildHelmAppsDocumentSymbols } from "./language/documentSymbols";
+import {
+  buildIncludeCandidates,
+  collectIncludeFileRefs,
+  collectIncludeFileRefsWithContext,
+  isTemplatedIncludePath,
+  selectHelmAppsRootDocuments,
+} from "./language/renderFiles";
+import {
+  renderIncludeReferenceSite,
+  summarizeIncludedFileContexts,
+  type IncludeReferenceContext,
+  type IncludedFileContextSummary,
+} from "./language/includeFileContext";
 import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "./language/symbols";
 import { discoverEnvironments, findAppScopeAtLine, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
 import {
@@ -21,7 +34,24 @@ import {
   forceEntityEnabled,
   withManifestRenderEntityEnabled,
 } from "./preview/entityRenderOverrides";
+import {
+  buildManifestBackendArgs as buildManifestBackendArgsForCommand,
+  resolveManifestBackendCommand as resolveManifestBackendCommandForConfig,
+  selectManifestValuesFiles,
+} from "./preview/manifestBackend";
+import {
+  buildPreviewEntityMenuModel,
+  buildPreviewEntityMenuModelFromGroups,
+  buildPreviewGlobalProjection,
+  type PreviewEntityMenuModel,
+} from "./preview/previewFlow";
 import { formatManifestPreviewError } from "./preview/manifestError";
+import {
+  createChartValuesReadFile,
+  isWerfSecretValuesFilePath,
+  mergeChartValues,
+  planChartValuesLoad,
+} from "./loader/chartValues";
 import { expandValuesWithFileIncludes, type IncludeDefinition } from "./loader/fileIncludes";
 import { extractAppChildToGlobalInclude, safeRenameAppKey } from "./refactor/appRefactor";
 import { ValuesStructureProvider } from "./structure/valuesTreeProvider";
@@ -29,6 +59,11 @@ import { HelmAppsWorkbenchActionsProvider } from "./structure/workbenchActionsPr
 import { buildStarterChartFiles, isValidChartVersion, sanitizeChartName } from "./scaffold/chartScaffold";
 import { DEFAULT_HAPP_LSP_ARGS, HappLspClient, type HappPreviewTheme, type LanguageMode } from "./lsp/client";
 import { HAPP_LSP_METHODS } from "./core/happProtocol";
+import {
+  buildOptimizeValuesRequest,
+  classifyOptimizeValuesGuard,
+  classifyOptimizeValuesResult,
+} from "./commands/optimizeValuesIncludesFlow";
 import { validateUnexpectedNativeLists } from "./validator/listPolicy";
 import {
   BUILTIN_GROUP_TYPES,
@@ -60,6 +95,7 @@ let completionSchemaCache: JsonSchema | null = null;
 const chartDetectionCache = new Map<string, boolean>();
 const includeFilesByChartCache = new Map<string, { scannedAt: number; files: Set<string> }>();
 const includeOwnersByChartCache = new Map<string, { scannedAt: number; owners: Map<string, Set<string>> }>();
+const includeContextsByChartCache = new Map<string, { scannedAt: number; contexts: Map<string, IncludeReferenceContext[]> }>();
 const HELM_APPS_DEP_NAME = "helm-apps";
 const happLspBootstrapOutput = vscode.window.createOutputChannel("helm-apps / happ-lsp bootstrap");
 const happLspClient = new HappLspClient(happLspBootstrapOutput);
@@ -100,17 +136,6 @@ type ManifestPreviewBackend = "fast" | "helm" | "werf";
 const MANIFEST_PREVIEW_BACKENDS: readonly ManifestPreviewBackend[] = ["fast", "helm", "werf"];
 
 type EnvironmentDiscoveryModel = { literals: string[]; regexes: string[] };
-
-interface PreviewEntityGroup {
-  name: string;
-  apps: string[];
-}
-
-interface PreviewEntityMenuModel {
-  groups: PreviewEntityGroup[];
-  selectedGroup: string;
-  selectedApp: string;
-}
 
 interface EntityPreviewState {
   documentUri: vscode.Uri;
@@ -280,6 +305,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
+      void clearHelmAppsDocumentCaches(event.document);
       const active = vscode.window.activeTextEditor?.document;
       if (!active || event.document.uri.toString() !== active.uri.toString()) {
         scheduleEntityPreviewRefreshFor(event.document, 90);
@@ -295,6 +321,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
+      void clearHelmAppsDocumentCaches(document);
       const p = document.uri.fsPath;
       if (p.endsWith("Chart.yaml") || p.includes(`${path.sep}templates${path.sep}`)) {
         chartDetectionCache.clear();
@@ -352,6 +379,11 @@ export function activate(context: vscode.ExtensionContext): void {
       provideHover: async (document, position) => await provideIncludeHover(document, position),
     }),
   );
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ language: "yaml" }, {
+      provideCodeLenses: async (document) => await provideIncludedFileCodeLenses(document),
+    }),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.goToIncludeDefinition", async () => {
@@ -388,6 +420,16 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.findUsages", async () => {
       await vscode.commands.executeCommand("editor.action.referenceSearch.trigger");
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("helm-apps.explainIncludeFileContext", async (uri?: vscode.Uri) => {
+      const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+      if (!targetUri) {
+        return;
+      }
+      const document = await vscode.workspace.openTextDocument(targetUri);
+      await explainIncludedFileContext(document);
     }),
   );
   context.subscriptions.push(
@@ -521,44 +563,53 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.optimizeValuesIncludes", async () => {
       const editor = vscode.window.activeTextEditor;
-      if (!editor) {
+      const blocker = classifyOptimizeValuesGuard({
+        hasActiveEditor: Boolean(editor),
+        isHelmAppsLanguageDocument: editor ? await isHelmAppsLanguageDocument(editor.document) : false,
+        happRunning: happLspClient.isRunning(),
+        methodAdvertised: happLspClient.advertisesMethod(HAPP_LSP_METHODS.optimizeValuesIncludes),
+      });
+      if (blocker) {
+        if (blocker === "wrongDocument") {
+          void vscode.window.showWarningMessage(
+            t(
+              "Open helm-apps values/include YAML to optimize include profiles.",
+              "Откройте YAML-файл values/include helm-apps для оптимизации include-профилей.",
+            ),
+          );
+          return;
+        }
+        if (blocker === "happUnavailable") {
+          void vscode.window.showWarningMessage(
+            t(
+              "happ LSP is unavailable. Include optimization requires happ.",
+              "happ LSP недоступен. Оптимизация include-профилей требует happ.",
+            ),
+          );
+          return;
+        }
+        if (blocker === "methodUnavailable") {
+          void vscode.window.showWarningMessage(
+            t(
+              "Current happ binary does not support include optimization method. Update happ.",
+              "Текущий бинарник happ не поддерживает метод оптимизации include. Обновите happ.",
+            ),
+          );
+          return;
+        }
         return;
       }
-      if (!(await isHelmAppsLanguageDocument(editor.document))) {
-        void vscode.window.showWarningMessage(
-          t(
-            "Open helm-apps values/include YAML to optimize include profiles.",
-            "Откройте YAML-файл values/include helm-apps для оптимизации include-профилей.",
-          ),
-        );
-        return;
-      }
-      if (!happLspClient.isRunning()) {
-        void vscode.window.showWarningMessage(
-          t(
-            "happ LSP is unavailable. Include optimization requires happ.",
-            "happ LSP недоступен. Оптимизация include-профилей требует happ.",
-          ),
-        );
-        return;
-      }
-      if (!happLspClient.advertisesMethod(HAPP_LSP_METHODS.optimizeValuesIncludes)) {
-        void vscode.window.showWarningMessage(
-          t(
-            "Current happ binary does not support include optimization method. Update happ.",
-            "Текущий бинарник happ не поддерживает метод оптимизации include. Обновите happ.",
-          ),
-        );
-        return;
-      }
-      const currentText = editor.document.getText();
+      const activeEditor = editor as vscode.TextEditor;
+      const currentText = activeEditor.document.getText();
       try {
-        const result = await happLspClient.optimizeValuesIncludes({
-          uri: editor.document.uri.toString(),
-          text: currentText,
-          minProfileBytes: 24,
-        });
-        if (!result.changed) {
+        const result = await happLspClient.optimizeValuesIncludes(
+          buildOptimizeValuesRequest({
+            uri: activeEditor.document.uri.toString(),
+            text: currentText,
+          }),
+        );
+        const resultPlan = classifyOptimizeValuesResult(result);
+        if (resultPlan.kind === "noChanges") {
           void vscode.window.showInformationMessage(
             t(
               "No shared fragments found for include optimization.",
@@ -568,19 +619,19 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const fullRange = new vscode.Range(
-          editor.document.positionAt(0),
-          editor.document.positionAt(currentText.length),
+          activeEditor.document.positionAt(0),
+          activeEditor.document.positionAt(currentText.length),
         );
-        const applied = await editor.edit((builder) => {
-          builder.replace(fullRange, result.optimizedText);
+        const applied = await activeEditor.edit((builder) => {
+          builder.replace(fullRange, resultPlan.optimizedText);
         });
         if (!applied) {
           throw new Error("unable to apply optimized values into editor");
         }
         void vscode.window.showInformationMessage(
           t(
-            `Optimized values: added ${result.profilesAdded} include profile(s).`,
-            `Оптимизация values завершена: добавлено include-профилей: ${result.profilesAdded}.`,
+            `Optimized values: added ${resultPlan.profilesAdded} include profile(s).`,
+            `Оптимизация values завершена: добавлено include-профилей: ${resultPlan.profilesAdded}.`,
           ),
         );
       } catch (err) {
@@ -661,7 +712,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.createStarterChart", async (uri?: vscode.Uri) => {
-      await createStarterChart(uri);
+      await createStarterChart(context, uri);
     }),
   );
   context.subscriptions.push(
@@ -690,7 +741,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  void configureSchema(context, true);
+  void configureSchemaOnStartup(context);
   valuesStructure.setDocument(vscode.window.activeTextEditor?.document);
   void refreshHelmAppsLanguageDocumentContext(vscode.window.activeTextEditor);
   scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 0);
@@ -746,19 +797,10 @@ async function initializeLanguageFeatures(context: vscode.ExtensionContext): Pro
   for (const candidatePath of pathCandidates) {
     // Log exact binary version for deterministic troubleshooting.
     // This helps distinguish PATH/fallback mismatches when multiple happ builds are present.
-    // eslint-disable-next-line no-await-in-loop
+     
     const candidateVersion = await readHappVersion(candidatePath);
     happLspBootstrapOutput.appendLine(`candidate version: ${candidatePath} :: ${candidateVersion ?? "unknown"}`);
 
-    // Validate candidate before LSP bootstrap to avoid starting incompatible binaries.
-    // Typical failure case: PATH points to older happ without `lsp` subcommand.
-    // eslint-disable-next-line no-await-in-loop
-    const preflight = await preflightHappLspCandidate(candidatePath);
-    if (!preflight.ok) {
-      happLspBootstrapOutput.appendLine(`skipped: ${candidatePath} :: ${preflight.reason}`);
-      startErrors.push(`${candidatePath}: ${preflight.reason}`);
-      continue;
-    }
     happLspBootstrapOutput.appendLine(`trying: ${candidatePath}`);
     const result = await happLspClient.start(context, candidatePath, args);
     if (!result.started) {
@@ -821,6 +863,20 @@ async function refreshHelmAppsLanguageDocumentContext(editor: vscode.TextEditor 
   await setHelmAppsLanguageDocumentContext(available);
 }
 
+async function clearHelmAppsDocumentCaches(document: vscode.TextDocument): Promise<void> {
+  if (document.languageId !== "yaml") {
+    return;
+  }
+  const chart = await findNearestChartYaml(document.uri.fsPath);
+  if (!chart) {
+    return;
+  }
+  const chartDir = path.dirname(chart.fsPath);
+  includeFilesByChartCache.delete(chartDir);
+  includeOwnersByChartCache.delete(chartDir);
+  includeContextsByChartCache.delete(chartDir);
+}
+
 function resetPreviewThemeState(): void {
   previewThemeCache = null;
   previewThemeFetchFailed = false;
@@ -858,11 +914,6 @@ async function resolveDevHappPathOverride(context: vscode.ExtensionContext): Pro
   }
 }
 
-type HappLspPreflight = {
-  ok: boolean;
-  reason: string;
-};
-
 async function readHappVersion(candidatePath: string): Promise<string | null> {
   try {
     const { stdout, stderr } = await execFileAsync(candidatePath, ["--version"], {
@@ -876,47 +927,6 @@ async function readHappVersion(candidatePath: string): Promise<string | null> {
     return line ?? null;
   } catch {
     return null;
-  }
-}
-
-async function preflightHappLspCandidate(candidatePath: string): Promise<HappLspPreflight> {
-  const execOpts = {
-    timeout: 8000,
-    maxBuffer: 1024 * 1024,
-  } as const;
-  const summarize = (err: unknown): string => {
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "stderr" in err &&
-      typeof (err as { stderr?: unknown }).stderr === "string"
-    ) {
-      const line = (err as { stderr: string }).stderr
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .find((s) => s.length > 0);
-      if (line) {
-        return line;
-      }
-    }
-    return extractErrorMessage(err);
-  };
-  const supportsLspFromHelp = (text: string): boolean => /(^|\n)\s*lsp(\s|$)/m.test(text);
-  try {
-    const help = await execFileAsync(candidatePath, ["--help"], execOpts);
-    const combined = `${help.stdout ?? ""}\n${help.stderr ?? ""}`;
-    if (!supportsLspFromHelp(combined)) {
-      return { ok: false, reason: "missing lsp subcommand in --help" };
-    }
-  } catch (err) {
-    return { ok: false, reason: `--help failed (${summarize(err)})` };
-  }
-
-  try {
-    await execFileAsync(candidatePath, ["lsp", "--help"], execOpts);
-    return { ok: true, reason: "ok" };
-  } catch (err) {
-    return { ok: false, reason: `lsp --help failed (${summarize(err)})` };
   }
 }
 
@@ -979,7 +989,8 @@ function firstDefinitionLocation(
 
 async function configureSchema(context: vscode.ExtensionContext, silent = false): Promise<void> {
   const manualFileMatch = vscode.workspace.getConfiguration("helm-apps").get<string[]>("schemaFileMatch", []);
-  const fileMatch = manualFileMatch.length > 0 ? manualFileMatch : await discoverHelmAppsSchemaTargets();
+  const rawFileMatch = manualFileMatch.length > 0 ? manualFileMatch : await discoverHelmAppsSchemaTargets();
+  const fileMatch = rawFileMatch.filter((filePath) => !isWerfSecretValuesFilePath(filePath));
 
   const yamlConfig = vscode.workspace.getConfiguration("yaml");
   const current = (yamlConfig.get<Record<string, string[]>>("schemas") ?? {}) as Record<string, string[]>;
@@ -995,6 +1006,10 @@ async function configureSchema(context: vscode.ExtensionContext, silent = false)
     next[schemaUri] = fileMatch;
   } else {
     delete next[schemaUri];
+  }
+
+  if (jsonStringifyStable(current) === jsonStringifyStable(next)) {
+    return;
   }
 
   try {
@@ -1016,6 +1031,27 @@ async function configureSchema(context: vscode.ExtensionContext, silent = false)
         : "helm-apps schema mapping cleared (no helm-apps charts detected)",
     );
   }
+}
+
+async function configureSchemaOnStartup(context: vscode.ExtensionContext): Promise<void> {
+  const yamlConfig = vscode.workspace.getConfiguration("yaml");
+  const current = (yamlConfig.get<Record<string, string[]>>("schemas") ?? {}) as Record<string, string[]>;
+  const activeSchemaUri = vscode.Uri.file(path.join(context.extensionPath, "schemas", "values.schema.json")).toString();
+  if (current[activeSchemaUri]) {
+    return;
+  }
+  await configureSchema(context, true);
+}
+
+function jsonStringifyStable(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => jsonStringifyStable(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${jsonStringifyStable(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function shouldReplaceLegacyHelmAppsSchema(existingSchemaUri: string, activeSchemaUri: string): boolean {
@@ -1149,14 +1185,14 @@ async function refreshInsertTemplateContext(editor: vscode.TextEditor | undefine
     return;
   }
 
-  const text = activeEditor.document.getText();
-  if (!looksLikeHelmAppsValuesText(text)) {
+  if (!(await isHelmAppsLanguageDocument(activeEditor.document))) {
     if (requestVersion === insertTemplateContextVersion) {
       await applyInsertTemplateContextState(false, new Set<string>());
     }
     return;
   }
 
+  const text = activeEditor.document.getText();
   const blocks = collectTopLevelGroupBlocks(text);
   const activeBlock = findTopLevelGroupBlockAtLine(text, blocks, activeEditor.selection.active.line);
   const allowed = buildAllowedTemplateGroupTypes(text, blocks, activeBlock, ENTITY_TEMPLATE_COMMANDS);
@@ -1574,7 +1610,7 @@ async function pasteClipboardAsHelmApps(editor: vscode.TextEditor): Promise<void
   }
 }
 
-async function createStarterChart(uri?: vscode.Uri): Promise<void> {
+async function createStarterChart(context: vscode.ExtensionContext, uri?: vscode.Uri): Promise<void> {
   const targetBaseDir = await resolveStarterChartBaseDir(uri);
   if (!targetBaseDir) {
     return;
@@ -1609,7 +1645,17 @@ async function createStarterChart(uri?: vscode.Uri): Promise<void> {
   }
 
   const chartDir = path.resolve(targetBaseDir, chartRelDir.trim());
-  const libraryVersion = await detectBundledHelmAppsVersion();
+  const happPath = await resolveReadyHappPathForLocalLibrary(context);
+  if (!happPath) {
+    return;
+  }
+  let libraryVersion: string;
+  try {
+    libraryVersion = await readEmbeddedHelmAppsVersionFromHapp(happPath);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Failed to read embedded helm-apps version from happ: ${extractErrorMessage(err)}`);
+    return;
+  }
   const files = buildStarterChartFiles({
     chartName,
     chartVersion,
@@ -1635,18 +1681,21 @@ async function createStarterChart(uri?: vscode.Uri): Promise<void> {
     await writeFile(abs, content, "utf8");
   }
 
-  const bundledResult = await copyBundledHelmAppsLibrary(chartDir);
+  const embeddedResult = await extractEmbeddedHelmAppsLibraryFromHapp(
+    happPath,
+    path.join(chartDir, "charts", HELM_APPS_DEP_NAME),
+  );
 
   const chartYamlPath = path.join(chartDir, "Chart.yaml");
   const doc = await vscode.workspace.openTextDocument(chartYamlPath);
   await vscode.window.showTextDocument(doc, { preview: false });
-  if (bundledResult === "ok") {
+  if (embeddedResult === "ok") {
     void vscode.window.showInformationMessage(
-      `Starter chart created in '${chartDir}', bundled helm-apps library copied to charts/helm-apps.`,
+      `Starter chart created in '${chartDir}', embedded helm-apps library extracted via happ into charts/helm-apps.`,
     );
   } else {
     void vscode.window.showWarningMessage(
-      `Starter chart created in '${chartDir}', but bundled library asset was not found in extension package.`,
+      `Starter chart created in '${chartDir}', but happ could not extract the embedded helm-apps library into charts/helm-apps.`,
     );
   }
 }
@@ -1709,7 +1758,8 @@ async function manageLibrarySource(context: vscode.ExtensionContext): Promise<vo
       },
       {
         label: ru ? "Указать локальный путь к чарту" : "Set local chart path",
-        description: localPath || (ru ? "Не задан" : "Not set"),
+        description:
+          localPath || (ru ? "Не задан (будет использован встроенный чарт из happ)" : "Not set (embedded chart from happ will be used)"),
         action: "set-local-path" as const,
       },
       {
@@ -1837,7 +1887,15 @@ async function resolveCurrentLibraryVersionForComparison(
       return await detectChartVersionFromDir(localPath);
     }
   }
-  return await detectBundledHelmAppsVersion();
+  const happPath = await resolveReadyHappPathForLocalLibrary(context);
+  if (!happPath) {
+    return undefined;
+  }
+  try {
+    return await readEmbeddedHelmAppsVersionFromHapp(happPath);
+  } catch {
+    return undefined;
+  }
 }
 
 async function cacheLibraryFromGithub(context: vscode.ExtensionContext, setAsCurrentSource: boolean): Promise<ResolvedLibraryChart> {
@@ -1959,13 +2017,7 @@ async function resolveLibraryChartForDependency(context: vscode.ExtensionContext
     }
     return { chartPath: configuredLocal, version, source: "local" };
   }
-
-  const bundledPath = path.resolve(__dirname, "..", "..", "assets", HELM_APPS_DEP_NAME);
-  const version = await detectChartVersionFromDir(bundledPath);
-  if (!version) {
-    throw new Error("bundled helm-apps chart not found in extension assets");
-  }
-  return { chartPath: bundledPath, version, source: "local" };
+  return await resolveEmbeddedLibraryChartFromHapp(context);
 }
 
 async function upsertHelmAppsDependency(chartYamlPath: string, version: string, chartPath: string): Promise<void> {
@@ -2090,7 +2142,7 @@ async function findExistingScaffoldFiles(chartDir: string, relPaths: string[]): 
   for (const rel of relPaths) {
     const abs = path.join(chartDir, rel);
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       await access(abs);
       existing.push(rel);
     } catch {
@@ -2120,75 +2172,80 @@ async function resolveStarterChartBaseDir(uri?: vscode.Uri): Promise<string | un
   return picked[0].fsPath;
 }
 
-async function copyBundledHelmAppsLibrary(chartDir: string): Promise<"ok" | "failed"> {
-  const src = path.resolve(__dirname, "..", "..", "assets", "helm-apps");
-  try {
-    await access(path.join(src, "Chart.yaml"));
-  } catch {
-    return "failed";
+async function resolveReadyHappPathForLocalLibrary(context: vscode.ExtensionContext): Promise<string | undefined> {
+  const configuredHappPath = await resolveOperationalHappPath(context);
+  if (!(await ensureHappReady(configuredHappPath))) {
+    return undefined;
   }
+  return configuredHappPath;
+}
 
-  const dst = path.join(chartDir, "charts", "helm-apps");
+async function resolveOperationalHappPath(context: vscode.ExtensionContext): Promise<string> {
+  const configuredPath = getExtensionConfig().get<string>("happPath", "happ").trim() || "happ";
+  const devOverride = await resolveDevHappPathOverride(context);
+  return devOverride ?? configuredPath;
+}
+
+async function readEmbeddedHelmAppsVersionFromHapp(happPath: string): Promise<string> {
+  const { stdout, stderr } = await execFileAsync(happPath, ["library", "version"], {
+    timeout: 30000,
+    maxBuffer: 256 * 1024,
+  });
+  const version = `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+  if (version.length === 0) {
+    throw new Error("happ returned empty embedded helm-apps version");
+  }
+  return version.split(/\r?\n/)[0].trim();
+}
+
+async function extractEmbeddedHelmAppsLibraryFromHapp(happPath: string, chartDir: string): Promise<"ok" | "failed"> {
   try {
-    await copyDirectoryRecursive(src, dst);
+    await rm(chartDir, { recursive: true, force: true });
+    await execFileAsync(happPath, ["library", "extract", "--out-dir", chartDir], {
+      timeout: 240000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    await access(path.join(chartDir, "Chart.yaml"));
     return "ok";
   } catch {
     return "failed";
   }
 }
 
-async function detectBundledHelmAppsVersion(): Promise<string> {
-  const chartYamlPath = path.resolve(__dirname, "..", "..", "assets", "helm-apps", "Chart.yaml");
+async function resolveEmbeddedLibraryChartFromHapp(context: vscode.ExtensionContext): Promise<ResolvedLibraryChart> {
+  const happPath = await resolveReadyHappPathForLocalLibrary(context);
+  if (!happPath) {
+    throw new Error("happ is unavailable, unable to extract embedded helm-apps chart");
+  }
+  const version = await readEmbeddedHelmAppsVersionFromHapp(happPath);
+  const cacheBase = path.join(context.globalStorageUri.fsPath, "library-cache", "embedded");
+  const chartDir = path.join(cacheBase, `${HELM_APPS_DEP_NAME}-${version}`);
+  const chartYamlPath = path.join(chartDir, "Chart.yaml");
   try {
-    const text = await readFile(chartYamlPath, "utf8");
-    const parsed = YAML.parse(text) as unknown;
-    if (isMap(parsed) && typeof parsed.version === "string" && parsed.version.trim().length > 0) {
-      return parsed.version.trim();
-    }
+    await access(chartYamlPath);
   } catch {
-    // use fallback
-  }
-  return "1.0.0";
-}
-
-async function copyDirectoryRecursive(src: string, dst: string): Promise<void> {
-  await mkdir(dst, { recursive: true });
-  const entries = await readdir(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const from = path.join(src, entry.name);
-    const to = path.join(dst, entry.name);
-    if (entry.isDirectory()) {
-      // eslint-disable-next-line no-await-in-loop
-      await copyDirectoryRecursive(from, to);
-      continue;
+    await mkdir(cacheBase, { recursive: true });
+    const extracted = await extractEmbeddedHelmAppsLibraryFromHapp(happPath, chartDir);
+    if (extracted !== "ok") {
+      throw new Error(`failed to extract embedded helm-apps ${version} from happ`);
     }
-    // eslint-disable-next-line no-await-in-loop
-    const data = await readFile(from);
-    // eslint-disable-next-line no-await-in-loop
-    await writeFile(to, data);
   }
+  return { chartPath: chartDir, version, source: "local" };
 }
 
 async function ensureHappReady(happPath: string): Promise<boolean> {
   const ru = isRuLocale();
   try {
-    const { stdout, stderr } = await execFileAsync(happPath, ["--help"], {
-      timeout: 15000,
-      maxBuffer: 1024 * 1024,
+    const { stdout, stderr } = await execFileAsync(happPath, ["--version"], {
+      timeout: 5000,
+      maxBuffer: 256 * 1024,
     });
-    const lc = `${stdout ?? ""}\n${stderr ?? ""}`.toLowerCase();
-    if (!lc.includes("happ")) {
+    const output = `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+    if (!/\bhapp\b/i.test(output)) {
       void vscode.window.showWarningMessage(
         ru
           ? "Настроенный бинарник happ ответил неожиданно. Проверьте helm-apps.happPath."
           : "Configured happ binary responded unexpectedly. Check helm-apps.happPath.",
-      );
-    }
-    if (!lc.includes("happ chart") || !lc.includes("happ manifests")) {
-      void vscode.window.showWarningMessage(
-        ru
-          ? "Похоже, указан несовместимый бинарник happ (нет команд chart/manifests)."
-          : "Configured happ binary looks incompatible (missing chart/manifests commands).",
       );
     }
     return true;
@@ -2572,8 +2629,9 @@ async function renderManifestFromHelmOrWerf(
     if (!isolationSetValues) {
       throw new Error(`unable to isolate entity ${state.group}.${state.app} for manifest render`);
     }
-    const command = resolveManifestBackendCommand(backend);
-    const args = buildManifestBackendArgs(
+    const configuredHelmPath = getExtensionConfig().get<string>("helmPath", "helm");
+    const command = resolveManifestBackendCommandForConfig(backend, configuredHelmPath);
+    const args = buildManifestBackendArgsForCommand(
       backend,
       backend === "werf" ? manifestWorkDir : chartDir,
       valuesFiles,
@@ -2621,29 +2679,14 @@ async function resolveManifestValuesFiles(
 ): Promise<string[]> {
   const currentPath = path.resolve(document.uri.fsPath);
   const rootDocs = await findHelmAppsRootDocuments(chartDir);
-  const normalizedRoots = new Set(rootDocs.map((current) => path.resolve(current)));
   const primaryValues = await findPrimaryValuesFileForChart(chartDir);
   const includeOwners = await collectIncludeOwnersForChart(chartDir);
-  const ownerCandidates = [...(includeOwners.get(currentPath) ?? [])].sort((a, b) => a.localeCompare(b));
-  if (ownerCandidates.length > 0) {
-    if (primaryValues && ownerCandidates.includes(primaryValues)) {
-      return [primaryValues];
-    }
-    return [ownerCandidates[0]];
-  }
-
-  if (normalizedRoots.has(currentPath)) {
-    if (primaryValues && currentPath !== primaryValues) {
-      return [primaryValues];
-    }
-    return [currentPath];
-  }
-
-  if (primaryValues) {
-    return [primaryValues];
-  }
-
-  return [currentPath];
+  return selectManifestValuesFiles({
+    currentPath,
+    rootDocuments: rootDocs,
+    primaryValues,
+    includeOwners: [...(includeOwners.get(currentPath) ?? [])],
+  });
 }
 
 async function findPrimaryValuesFileForChart(chartDir: string): Promise<string | undefined> {
@@ -2659,50 +2702,19 @@ async function findPrimaryValuesFileForChart(chartDir: string): Promise<string |
   return undefined;
 }
 
-function resolveManifestBackendCommand(backend: "helm" | "werf"): string {
-  const configured = getExtensionConfig().get<string>("helmPath", "helm").trim();
-  if (backend === "werf") {
-    if (configured.length > 0 && path.basename(configured) === "werf") {
-      return configured;
+async function findWerfSecretValuesFileForChart(chartDir: string): Promise<string | undefined> {
+  const candidates = [path.join(chartDir, "secret-values.yaml"), path.join(chartDir, "secret-values.yml")];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, fsConstants.R_OK);
+      if (isWerfSecretValuesFilePath(candidate)) {
+        return path.resolve(candidate);
+      }
+    } catch {
+      // continue
     }
-    return "werf";
   }
-  if (configured.length > 0 && path.basename(configured) !== "werf") {
-    return configured;
-  }
-  return "helm";
-}
-
-function buildManifestBackendArgs(
-  backend: "helm" | "werf",
-  chartDir: string,
-  valuesFiles: string[],
-  isolationSetValues: string[],
-  env: string,
-): string[] {
-  const valueArgs = valuesFiles
-    .map((current) => current.trim())
-    .filter((current) => current.length > 0)
-    .flatMap((current) => ["--values", current]);
-  const normalizedEnv = env.trim();
-  const setArgs = isolationSetValues
-    .map((current) => current.trim())
-    .filter((current) => current.length > 0)
-    .flatMap((current) => ["--set", current]);
-  const withEnvSet = (base: string[]): string[] => {
-    if (!normalizedEnv) {
-      return base;
-    }
-    return [...base, "--set-string", `global.env=${normalizedEnv}`];
-  };
-  if (backend === "werf") {
-    const args = ["render", "--dir", chartDir, "--dev", "--ignore-secret-key", ...valueArgs, ...setArgs];
-    if (normalizedEnv) {
-      args.push("--env", normalizedEnv);
-    }
-    return withEnvSet(args);
-  }
-  return withEnvSet(["template", "helm-apps-preview", chartDir, ...valueArgs, ...setArgs]);
+  return undefined;
 }
 
 function buildManifestPreviewCacheKey(
@@ -2853,71 +2865,6 @@ function readRawEntity(values: unknown, group: string, app: string): unknown {
   return (((parsed[group] as Record<string, unknown> | undefined) ?? {})[app] ?? {}) as unknown;
 }
 
-function buildPreviewEntityMenuModel(values: unknown, selectedGroup: string, selectedApp: string): PreviewEntityMenuModel {
-  const root = toMap(values);
-  const groups: PreviewEntityGroup[] = [];
-
-  if (root) {
-    for (const [groupName, groupValue] of Object.entries(root)) {
-      if (groupName === "global") {
-        continue;
-      }
-      const groupMap = toMap(groupValue);
-      if (!groupMap) {
-        continue;
-      }
-      const apps = Object.keys(groupMap).filter((appName) => appName !== "__GroupVars__");
-      if (apps.length === 0) {
-        continue;
-      }
-      groups.push({ name: groupName, apps });
-    }
-  }
-
-  if (groups.length === 0) {
-    return { groups, selectedGroup, selectedApp };
-  }
-
-  const nextGroup = groups.some((group) => group.name === selectedGroup) ? selectedGroup : groups[0].name;
-  const nextApps = groups.find((group) => group.name === nextGroup)?.apps ?? [];
-  const nextApp = nextApps.includes(selectedApp) ? selectedApp : (nextApps[0] ?? selectedApp);
-
-  return {
-    groups,
-    selectedGroup: nextGroup,
-    selectedApp: nextApp,
-  };
-}
-
-function buildPreviewEntityMenuModelFromGroups(
-  groupsRaw: ReadonlyArray<{ name: string; apps: string[] }>,
-  selectedGroup: string,
-  selectedApp: string,
-): PreviewEntityMenuModel {
-  const groups = groupsRaw
-    .map((group) => ({
-      name: group.name,
-      apps: [...group.apps]
-        .filter((app) => typeof app === "string" && app.trim().length > 0)
-        .map((app) => app.trim())
-        .sort((a, b) => a.localeCompare(b)),
-    }))
-    .filter((group) => group.name.trim().length > 0 && group.apps.length > 0)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  if (groups.length === 0) {
-    return { groups: [], selectedGroup, selectedApp };
-  }
-  const nextGroup = groups.some((group) => group.name === selectedGroup) ? selectedGroup : groups[0].name;
-  const nextApps = groups.find((group) => group.name === nextGroup)?.apps ?? [];
-  const nextApp = nextApps.includes(selectedApp) ? selectedApp : (nextApps[0] ?? selectedApp);
-  return {
-    groups,
-    selectedGroup: nextGroup,
-    selectedApp: nextApp,
-  };
-}
-
 async function resolvePreviewMenuAndEnv(
   document: vscode.TextDocument,
   documentText: string,
@@ -2970,114 +2917,54 @@ async function resolvePreviewMenuAndEnv(
   return { menuModel, envDiscovery, defaultEnv };
 }
 
-function buildPreviewGlobalProjection(
-  values: unknown,
-  entity: unknown,
-  env: string,
-): Record<string, unknown> {
-  const root = toMap(values);
-  const sourceGlobal = toMap(root?.global) ?? {};
-  const out: Record<string, unknown> = { env };
-
-  for (const section of ["validation", "labels", "deploy", "releases"] as const) {
-    const pruned = pruneDefaultish(sourceGlobal[section]);
-    if (pruned !== undefined) {
-      out[section] = pruned;
-    }
-  }
-
-  const referenced = collectReferencedGlobalKeys(entity);
-  for (const key of referenced) {
-    if (key === "env") {
-      continue;
-    }
-    if (Object.prototype.hasOwnProperty.call(out, key)) {
-      continue;
-    }
-    if (Object.prototype.hasOwnProperty.call(sourceGlobal, key)) {
-      out[key] = sourceGlobal[key];
-    }
-  }
-
-  return out;
-}
-
-function pruneDefaultish(value: unknown): unknown {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value === "boolean") {
-    return value ? true : undefined;
-  }
-  if (typeof value === "string") {
-    return value.trim().length > 0 ? value : undefined;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
-  }
-  if (Array.isArray(value)) {
-    const items = value
-      .map((item) => pruneDefaultish(item))
-      .filter((item) => item !== undefined);
-    return items.length > 0 ? items : undefined;
-  }
-  if (isMap(value)) {
-    const out: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) {
-      const pruned = pruneDefaultish(nested);
-      if (pruned !== undefined) {
-        out[key] = pruned;
-      }
-    }
-    return Object.keys(out).length > 0 ? out : undefined;
-  }
-  return value;
-}
-
-function collectReferencedGlobalKeys(entity: unknown): Set<string> {
-  const out = new Set<string>();
-  collectReferencedGlobalKeysInner(entity, out);
-  return out;
-}
-
-function collectReferencedGlobalKeysInner(value: unknown, out: Set<string>): void {
-  if (typeof value === "string") {
-    collectGlobalKeysFromTemplateString(value, out);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectReferencedGlobalKeysInner(item, out);
-    }
-    return;
-  }
-  if (isMap(value)) {
-    for (const nested of Object.values(value)) {
-      collectReferencedGlobalKeysInner(nested, out);
-    }
-  }
-}
-
-function collectGlobalKeysFromTemplateString(text: string, out: Set<string>): void {
-  const re = /(?:\$?\s*\.)?Values\.global\.([A-Za-z0-9_-]+)/g;
-  for (const match of text.matchAll(re)) {
-    const key = (match[1] ?? "").trim();
-    if (key.length > 0) {
-      out.add(key);
-    }
-  }
-}
-
 async function loadExpandedValues(document: vscode.TextDocument): Promise<{
   values: Record<string, unknown>;
   includeDefinitions: IncludeDefinition[];
   missingFiles: Array<{ rawPath: string; tried: string[] }>;
 }> {
-  const parsed = YAML.parse(document.getText()) as unknown;
-  if (!isMap(parsed)) {
+  const currentPath = path.resolve(document.uri.fsPath);
+  const currentText = document.getText();
+  const currentParsed = YAML.parse(currentText) as unknown;
+  if (!isMap(currentParsed)) {
     throw new Error("values file must be a YAML map");
   }
-  return await expandValuesWithFileIncludes(parsed, document.uri.fsPath, async (filePath) => await readFile(filePath, "utf8"));
+  const chartReadFile = createChartValuesReadFile(
+    async (filePath) => await readFile(filePath, "utf8"),
+    currentPath,
+    currentText,
+  );
+
+  let root = currentParsed;
+  let basePath = currentPath;
+  const chart = await findNearestChartYaml(document.uri.fsPath);
+  if (chart && await isHelmAppsChart(chart)) {
+    const chartDir = path.dirname(chart.fsPath);
+    const plan = planChartValuesLoad({
+      currentPath,
+      primaryValuesPath: await findPrimaryValuesFileForChart(chartDir),
+      werfSecretValuesPath: await findWerfSecretValuesFileForChart(chartDir),
+    });
+    basePath = plan.basePath;
+
+    const readParsedMap = async (filePath: string): Promise<Record<string, unknown>> => {
+      if (path.resolve(filePath) === currentPath) {
+        return currentParsed;
+      }
+      const raw = await chartReadFile(filePath);
+      const parsed = YAML.parse(raw) as unknown;
+      if (!isMap(parsed)) {
+        throw new Error(`values file must be a YAML map: ${filePath}`);
+      }
+      return parsed;
+    };
+
+    root = await readParsedMap(basePath);
+    for (const mergePath of plan.mergePaths) {
+      root = mergeChartValues(root, await readParsedMap(mergePath));
+    }
+  }
+
+  return await expandValuesWithFileIncludes(root, basePath, chartReadFile);
 }
 
 async function loadExpandedValuesForPreview(document: vscode.TextDocument): Promise<{
@@ -3282,15 +3169,17 @@ async function collectWorkspaceSymbolOccurrences(
     new vscode.RelativePattern(chartRoot, "**/*.{yaml,yml}"),
     "**/{.git,node_modules,vendor,tmp,.werf}/**",
   );
+  const rootDocs = new Set((await findHelmAppsRootDocuments(chartRoot)).map((current) => path.resolve(current)));
   const includeFiles = await collectIncludeFilesForChart(chartRoot);
 
   for (const uri of files) {
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       const doc = await vscode.workspace.openTextDocument(uri);
       const text = doc.getText();
+      const isRootDocument = rootDocs.has(path.resolve(uri.fsPath));
       const isIncludedFile = includeFiles.has(path.resolve(uri.fsPath));
-      if (!looksLikeHelmAppsValuesText(text) && !isIncludedFile) {
+      if (!isRootDocument && !isIncludedFile) {
         continue;
       }
       const occs = collectSymbolOccurrences(text, symbol);
@@ -4114,7 +4003,7 @@ async function findFirstExistingIncludeFile(document: vscode.TextDocument): Prom
     const candidates = buildIncludeCandidates(ref.path, baseDir);
     for (const candidate of candidates) {
       try {
-        // eslint-disable-next-line no-await-in-loop
+         
         await access(candidate);
         return vscode.Uri.file(candidate);
       } catch {
@@ -4214,12 +4103,206 @@ async function provideIncludeHover(
     }
   }
 
+  const includeDefinitionHover = await provideIncludedFileDefinitionHover(document, position);
+  if (includeDefinitionHover) {
+    return includeDefinitionHover;
+  }
+
   const fieldHover = provideFieldHover(document, position);
   if (fieldHover) {
     return fieldHover;
   }
 
   return undefined;
+}
+
+async function provideIncludedFileCodeLenses(
+  document: vscode.TextDocument,
+): Promise<vscode.CodeLens[] | undefined> {
+  if (!(await isHelmAppsIncludedFileDocument(document))) {
+    return undefined;
+  }
+  const summary = await resolveIncludedFileContextSummary(document);
+  if (!summary) {
+    return undefined;
+  }
+  const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0));
+  const lenses: vscode.CodeLens[] = [];
+  const ru = vscode.env.language.toLowerCase().startsWith("ru");
+
+  lenses.push(new vscode.CodeLens(range, {
+    command: "helm-apps.explainIncludeFileContext",
+    title: buildIncludedFilePrimaryLensTitle(summary, ru),
+    arguments: [document.uri],
+  }));
+
+  const ownersTitle = buildIncludedFileOwnersLensTitle(summary, ru);
+  if (ownersTitle) {
+    lenses.push(new vscode.CodeLens(range, {
+      command: "helm-apps.explainIncludeFileContext",
+      title: ownersTitle,
+      arguments: [document.uri],
+    }));
+  }
+  return lenses;
+}
+
+async function provideIncludedFileDefinitionHover(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<vscode.Hover | undefined> {
+  if (!(await isHelmAppsIncludedFileDocument(document))) {
+    return undefined;
+  }
+  const summary = await resolveIncludedFileContextSummary(document);
+  if (!summary || summary.mode !== "global-includes") {
+    return undefined;
+  }
+  const pathAtCursor = findKeyPathAtPosition(document.getText(), position.line, position.character);
+  if (!pathAtCursor || pathAtCursor.length !== 1) {
+    return undefined;
+  }
+  const includeName = pathAtCursor[0] ?? "";
+  if (!/^[A-Za-z0-9_.-]+$/.test(includeName) || isIncludeEntryHelperKey(includeName)) {
+    return undefined;
+  }
+  const previewBlock = extractIncludeProfileBlock(document.getText(), includeName);
+  const ru = vscode.env.language.toLowerCase().startsWith("ru");
+  const md = new vscode.MarkdownString();
+  md.appendMarkdown(`**${ru ? "include-профиль" : "include profile"}** \`${includeName}\`  \n`);
+  md.appendMarkdown(`${ru ? "Источник" : "Source"}: \`${document.uri.fsPath}\`  \n`);
+  md.appendMarkdown(`${ru ? "Контекст" : "Context"}: \`global._includes\`\n\n`);
+  md.appendMarkdown(ru
+    ? "Top-level ключ этого файла становится доступным как reusable include-профиль через `_include`.\n\n"
+    : "This top-level key becomes a reusable include profile available through `_include`.\n\n");
+  if (previewBlock) {
+    md.appendCodeblock(trimPreview(previewBlock), "yaml");
+  }
+  return new vscode.Hover(md);
+}
+
+async function explainIncludedFileContext(document: vscode.TextDocument): Promise<void> {
+  const summary = await resolveIncludedFileContextSummary(document);
+  if (!summary) {
+    return;
+  }
+  const ru = vscode.env.language.toLowerCase().startsWith("ru");
+  const lines: string[] = [];
+  lines.push(`# helm-apps ${ru ? "контекст include-файла" : "include file context"}`);
+  lines.push("");
+  lines.push(`- ${ru ? "Файл" : "File"}: \`${document.uri.fsPath}\``);
+  lines.push(`- ${ru ? "Роль" : "Role"}: ${buildIncludedFilePrimaryLensTitle(summary, ru)}`);
+  lines.push(`- ${ru ? "Root values-файлы" : "Root values files"}: ${summary.ownerRoots.map((item) => `\`${path.basename(item)}\``).join(", ")}`);
+  lines.push("");
+  lines.push(ru ? "## Что это значит" : "## What this means");
+  lines.push("");
+  for (const line of buildIncludedFileMeaningLines(summary, ru)) {
+    lines.push(`- ${line}`);
+  }
+  lines.push("");
+  lines.push(ru ? "## Где файл подключается" : "## Where this file is included");
+  lines.push("");
+  for (const context of summary.contexts) {
+    const owner = path.basename(context.rootDocument);
+    const source = path.basename(context.sourceFile);
+    lines.push(`- \`${owner}\` -> \`${source}:${context.line + 1}\` -> \`${renderIncludeReferenceSite(context)}\``);
+  }
+
+  const doc = await vscode.workspace.openTextDocument({
+    language: "markdown",
+    content: lines.join("\n"),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
+}
+
+function buildIncludedFilePrimaryLensTitle(summary: IncludedFileContextSummary, ru: boolean): string {
+  switch (summary.mode) {
+    case "global-includes":
+      return ru
+        ? "helm-apps include-файл: мержится в global._includes"
+        : "helm-apps include file: merged into global._includes";
+    case "merged-path":
+      return ru
+        ? `helm-apps include-файл: мержится в ${summary.primaryPath ?? "<root>"}`
+        : `helm-apps include file: merged into ${summary.primaryPath ?? "<root>"}`;
+    case "include-files":
+      return ru
+        ? `helm-apps include-файл: используется через _include_files в ${summary.primaryPath ?? "<root>"}`
+        : `helm-apps include file: used via _include_files at ${summary.primaryPath ?? "<root>"}`;
+    case "mixed":
+    default:
+      return ru
+        ? "helm-apps include-файл: используется в нескольких include-контекстах"
+        : "helm-apps include file: used in multiple include contexts";
+  }
+}
+
+function buildIncludedFileOwnersLensTitle(summary: IncludedFileContextSummary, ru: boolean): string | undefined {
+  if (summary.ownerRoots.length === 0) {
+    return undefined;
+  }
+  const owners = summary.ownerRoots.map((item) => path.basename(item)).join(", ");
+  return ru ? `root values: ${owners}` : `root values: ${owners}`;
+}
+
+function buildIncludedFileMeaningLines(summary: IncludedFileContextSummary, ru: boolean): string[] {
+  switch (summary.mode) {
+    case "global-includes":
+      return ru
+        ? [
+          "Top-level ключи этого файла становятся include-профилями в `global._includes`.",
+          "Их можно использовать из приложений через `_include`.",
+          "Внутри каждого профиля значения трактуются как обычный helm-apps payload.",
+        ]
+        : [
+          "Top-level keys in this file become include profiles inside `global._includes`.",
+          "Apps can reference them via `_include`.",
+          "Values inside each profile are treated as regular helm-apps payload.",
+        ];
+    case "merged-path":
+      return ru
+        ? [
+          `Содержимое файла мержится в путь \`${summary.primaryPath ?? "<root>"}\`.`,
+          "Top-level ключи здесь трактуются как payload этого узла, а не как глобальные include-профили.",
+        ]
+        : [
+          `The file content is merged into \`${summary.primaryPath ?? "<root>"}\`.`,
+          "Top-level keys here are treated as payload for that node, not as global include profiles.",
+        ];
+    case "include-files":
+      return ru
+        ? [
+          `Файл подхватывается через \`_include_files\` из узла \`${summary.primaryPath ?? "<root>"}\`.`,
+          "Его YAML используется как вставляемый payload для этого поля.",
+        ]
+        : [
+          `The file is referenced via \`_include_files\` from \`${summary.primaryPath ?? "<root>"}\`.`,
+          "Its YAML is used as injected payload for that field.",
+        ];
+    case "mixed":
+    default:
+      return ru
+        ? [
+          "Этот файл используется более чем в одном include-контексте.",
+          "Ниже показаны конкретные точки подключения.",
+        ]
+        : [
+          "This file is used in more than one include context.",
+          "See concrete inclusion points below.",
+        ];
+  }
+}
+
+async function resolveIncludedFileContextSummary(
+  document: vscode.TextDocument,
+): Promise<IncludedFileContextSummary | undefined> {
+  const chart = await findNearestChartYaml(document.uri.fsPath);
+  if (!chart || !(await isHelmAppsChart(chart))) {
+    return undefined;
+  }
+  const chartDir = path.dirname(chart.fsPath);
+  const contextsByFile = await collectIncludeContextsForChart(chartDir);
+  return summarizeIncludedFileContexts(contextsByFile.get(path.resolve(document.uri.fsPath)) ?? []);
 }
 
 function provideFieldHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
@@ -4244,7 +4327,7 @@ async function discoverHelmAppsSchemaTargets(): Promise<string[]> {
   const out = new Set<string>();
 
   for (const chart of charts) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const enabled = await isHelmAppsChart(chart);
     if (!enabled) {
       continue;
@@ -4252,11 +4335,15 @@ async function discoverHelmAppsSchemaTargets(): Promise<string[]> {
     const chartDir = path.dirname(chart.fsPath);
     // Root helm-apps values files may have arbitrary names.
     // Use content-based detection instead of values*.yaml convention.
-    // eslint-disable-next-line no-await-in-loop
+     
     const rootDocs = await findHelmAppsRootDocuments(chartDir);
     for (const filePath of rootDocs) {
       out.add(vscode.workspace.asRelativePath(vscode.Uri.file(filePath), false));
     }
+
+    // Do not auto-attach the strict values.schema.json to werf secret-values files.
+    // They overlay the chart values tree at render time, but encrypted leaf scalars
+    // may intentionally violate plain values leaf types (for example string|null).
 
     // Include files referenced from values/_include_files are chart-related documents
     // and should receive the same schema support.
@@ -4283,7 +4370,7 @@ async function isHelmAppsChart(chartYamlUri: vscode.Uri): Promise<boolean> {
 
   for (const t of templates.slice(0, 80)) {
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       const raw = await readFile(t.fsPath, "utf8");
       if (raw.includes(`include "apps-utils.init-library"`)) {
         chartDetectionCache.set(cacheKey, true);
@@ -4301,16 +4388,21 @@ async function isHelmAppsValuesDocument(document: vscode.TextDocument): Promise<
   if (document.languageId !== "yaml") {
     return false;
   }
-  const text = document.getText();
-  if (!looksLikeHelmAppsValuesText(text)) {
-    return false;
-  }
-
   const chart = await findNearestChartYaml(document.uri.fsPath);
   if (!chart) {
     return false;
   }
-  return await isHelmAppsChart(chart);
+  if (!(await isHelmAppsChart(chart))) {
+    return false;
+  }
+  const chartDir = path.dirname(chart.fsPath);
+  const currentPath = path.resolve(document.uri.fsPath);
+  const werfSecretValues = await findWerfSecretValuesFileForChart(chartDir);
+  if (werfSecretValues && path.resolve(werfSecretValues) === currentPath) {
+    return true;
+  }
+  const rootDocuments = await findHelmAppsRootDocuments(chartDir);
+  return rootDocuments.includes(currentPath);
 }
 
 async function isHelmAppsLanguageDocument(document: vscode.TextDocument): Promise<boolean> {
@@ -4356,7 +4448,7 @@ async function collectIncludeFilesForChart(chartDir: string): Promise<Set<string
 
     let text = "";
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       text = await readFile(current, "utf8");
     } catch {
       continue;
@@ -4372,7 +4464,7 @@ async function collectIncludeFilesForChart(chartDir: string): Promise<Set<string
       for (const candidate of candidates) {
         const abs = path.resolve(candidate);
         try {
-          // eslint-disable-next-line no-await-in-loop
+           
           await access(abs);
           if (!discovered.has(abs)) {
             discovered.add(abs);
@@ -4411,7 +4503,7 @@ async function collectIncludeOwnersForChart(chartDir: string): Promise<Map<strin
 
       let text = "";
       try {
-        // eslint-disable-next-line no-await-in-loop
+         
         text = await readFile(current, "utf8");
       } catch {
         continue;
@@ -4427,7 +4519,7 @@ async function collectIncludeOwnersForChart(chartDir: string): Promise<Map<strin
         for (const candidate of candidates) {
           const includedPath = path.resolve(candidate);
           try {
-            // eslint-disable-next-line no-await-in-loop
+             
             await access(includedPath, fsConstants.R_OK);
             if (!owners.has(includedPath)) {
               owners.set(includedPath, new Set<string>());
@@ -4452,6 +4544,84 @@ async function collectIncludeOwnersForChart(chartDir: string): Promise<Map<strin
   return owners;
 }
 
+async function collectIncludeContextsForChart(chartDir: string): Promise<Map<string, IncludeReferenceContext[]>> {
+  const now = Date.now();
+  const cached = includeContextsByChartCache.get(chartDir);
+  if (cached && now - cached.scannedAt <= INCLUDE_FILE_CACHE_TTL_MS) {
+    return cloneIncludeContextsMap(cached.contexts);
+  }
+
+  const contexts = new Map<string, IncludeReferenceContext[]>();
+  const roots = (await findHelmAppsRootDocuments(chartDir)).map((current) => path.resolve(current));
+
+  for (const root of roots) {
+    const visited = new Set<string>();
+    const queue: string[] = [root];
+    while (queue.length > 0) {
+      const current = path.resolve(String(queue.pop() ?? ""));
+      if (current.length === 0 || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      let text = "";
+      try {
+        text = await readFile(current, "utf8");
+      } catch {
+        continue;
+      }
+
+      const refs = collectIncludeFileRefsWithContext(text);
+      const baseDir = path.dirname(current);
+      for (const ref of refs) {
+        if (isTemplatedIncludePath(ref.path)) {
+          continue;
+        }
+        const candidates = buildIncludeCandidates(ref.path, baseDir);
+        for (const candidate of candidates) {
+          const includedPath = path.resolve(candidate);
+          try {
+            await access(includedPath, fsConstants.R_OK);
+            if (!contexts.has(includedPath)) {
+              contexts.set(includedPath, []);
+            }
+            const bucket = contexts.get(includedPath) ?? [];
+            if (!bucket.some((item) =>
+              item.rootDocument === root
+              && item.sourceFile === current
+              && item.line === ref.line
+              && item.kind === ref.kind
+              && item.rawPath === ref.path
+              && item.parentPath.join(".") === ref.parentPath.join("."))) {
+              bucket.push({
+                rootDocument: root,
+                sourceFile: current,
+                rawPath: ref.path,
+                line: ref.line,
+                kind: ref.kind,
+                parentPath: [...ref.parentPath],
+              });
+            }
+            contexts.set(includedPath, bucket);
+            if (!visited.has(includedPath)) {
+              queue.push(includedPath);
+            }
+            break;
+          } catch {
+            // try next candidate
+          }
+        }
+      }
+    }
+  }
+
+  includeContextsByChartCache.set(chartDir, {
+    scannedAt: now,
+    contexts: cloneIncludeContextsMap(contexts),
+  });
+  return contexts;
+}
+
 function cloneIncludeOwnersMap(source: Map<string, Set<string>>): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   for (const [key, owners] of source) {
@@ -4460,40 +4630,32 @@ function cloneIncludeOwnersMap(source: Map<string, Set<string>>): Map<string, Se
   return out;
 }
 
+function cloneIncludeContextsMap(source: Map<string, IncludeReferenceContext[]>): Map<string, IncludeReferenceContext[]> {
+  const out = new Map<string, IncludeReferenceContext[]>();
+  for (const [key, contexts] of source) {
+    out.set(key, contexts.map((context) => ({
+      ...context,
+      parentPath: [...context.parentPath],
+    })));
+  }
+  return out;
+}
+
 async function findHelmAppsRootDocuments(chartDir: string): Promise<string[]> {
-  const out = new Set<string>();
   const yamlFiles = await vscode.workspace.findFiles(
     new vscode.RelativePattern(chartDir, "**/*.{yaml,yml}"),
     "**/{.git,node_modules,vendor,tmp,.werf,templates}/**",
   );
+  const documents: Array<{ filePath: string; text: string }> = [];
   for (const file of yamlFiles) {
     try {
-      // eslint-disable-next-line no-await-in-loop
       const text = await readFile(file.fsPath, "utf8");
-      if (looksLikeHelmAppsValuesText(text)) {
-        out.add(path.resolve(file.fsPath));
-      }
+      documents.push({ filePath: file.fsPath, text });
     } catch {
       // ignore unreadable yaml file
     }
   }
-  return [...out];
-}
-
-function looksLikeHelmAppsValuesText(text: string): boolean {
-  if (/\n?global:\s*/m.test(text) && /(?:^|\n)\s*_includes:\s*/m.test(text)) {
-    return true;
-  }
-  if (/\n?global:\s*/m.test(text) && /(?:^|\n)\s*releases:\s*/m.test(text)) {
-    return true;
-  }
-  if (/(?:^|\n)apps-[a-z0-9-]+:\s*/m.test(text)) {
-    return true;
-  }
-  if (/(?:^|\n)\s*__GroupVars__:\s*/m.test(text)) {
-    return true;
-  }
-  return false;
+  return selectHelmAppsRootDocuments(documents);
 }
 
 async function findNearestChartYaml(fromFile: string): Promise<vscode.Uri | undefined> {
@@ -4502,7 +4664,7 @@ async function findNearestChartYaml(fromFile: string): Promise<vscode.Uri | unde
   while (dir !== root) {
     const candidate = path.join(dir, "Chart.yaml");
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       await access(candidate);
       return vscode.Uri.file(candidate);
     } catch {
@@ -4618,7 +4780,7 @@ async function findIncludeDefinitionInReferencedFiles(
       }
       seen.add(candidate);
       try {
-        // eslint-disable-next-line no-await-in-loop
+         
         const raw = await readFile(candidate, "utf8");
         const line = findTopLevelKeyLine(raw, includeName);
         if (line >= 0) {
@@ -5608,69 +5770,6 @@ function toMap(value: unknown): Record<string, unknown> | null {
   return isMap(value) ? value : null;
 }
 
-function collectIncludeFileRefs(text: string): Array<{ path: string; line: number }> {
-  const lines = text.split(/\r?\n/);
-  const refs: Array<{ path: string; line: number }> = [];
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const keyMatch = line.match(/^(\s*)(_include_from_file|_include_files):\s*(.*)$/);
-    if (!keyMatch) {
-      continue;
-    }
-    const indent = keyMatch[1].length;
-    const key = keyMatch[2];
-    const tail = keyMatch[3].trim();
-
-    if (key === "_include_from_file") {
-      const v = unquote(tail);
-      if (v && !isTemplatedIncludePath(v)) {
-        refs.push({ path: v, line: i });
-      }
-      continue;
-    }
-
-    if (tail.startsWith("[") && tail.endsWith("]")) {
-      const inside = tail.slice(1, -1);
-      for (const part of inside.split(",")) {
-        const v = unquote(part.trim());
-        if (v && !isTemplatedIncludePath(v)) {
-          refs.push({ path: v, line: i });
-        }
-      }
-      continue;
-    }
-
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const sub = lines[j];
-      const t = sub.trim();
-      if (t.length === 0 || t.startsWith("#")) {
-        continue;
-      }
-      const subIndent = countIndent(sub);
-      if (subIndent <= indent) {
-        break;
-      }
-      const item = sub.match(/^\s*-\s+(.+)\s*$/);
-      if (item) {
-        const v = unquote(item[1].trim());
-        if (v && !isTemplatedIncludePath(v)) {
-          refs.push({ path: v, line: j });
-        }
-      }
-    }
-  }
-
-  return refs;
-}
-
-function buildIncludeCandidates(rawPath: string, baseDir: string): string[] {
-  if (path.isAbsolute(rawPath)) {
-    return [rawPath];
-  }
-  return [path.resolve(baseDir, rawPath)];
-}
-
 function unquote(value: string): string {
   const v = value.trim();
   if (v.length < 2) {
@@ -5680,10 +5779,6 @@ function unquote(value: string): string {
     return v.slice(1, -1);
   }
   return v;
-}
-
-function isTemplatedIncludePath(value: string): boolean {
-  return value.includes("{{") || value.includes("}}");
 }
 
 function detectDefaultEnv(values: unknown, envDiscovery: EnvironmentDiscovery): string {

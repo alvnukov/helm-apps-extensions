@@ -5307,7 +5307,6 @@ export function findKeyPathAtPosition(text: string, line: number, character: num
 
     const key = keyMatch[2];
     const keyStart = keyMatch[1].length;
-    const keyEnd = keyStart + key.length;
     const path = [...stack.map((s) => s.key), key];
 
     if (i === line) {
@@ -5698,7 +5697,7 @@ function specializeDocForPath(path: string[], doc: FieldDoc): FieldDoc {
   };
 }
 
-function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, guide: GroupAppGuide): FieldDoc | null {
+function nonTypicalGroupFieldDoc(path: string[], doc: FieldDoc, _guide: GroupAppGuide): FieldDoc | null {
   const group = path[0];
   if (!APP_ENTRY_GROUP_SET.has(group) || path.length < 3) {
     return null;

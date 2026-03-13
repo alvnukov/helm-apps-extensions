@@ -2,7 +2,7 @@
   "name": "helm-apps",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.5",
+  "version": "1.0.0",
   "publisher": "alvnukov",
   "license": "Apache-2.0",
   "repository": {
@@ -517,13 +517,15 @@
     }
   },
   "scripts": {
-    "build": "npm run sync:library && tsc -p .",
+    "build": "tsc -p .",
+    "lint": "eslint .",
+    "lint:fix": "npm run lint -- --fix",
     "watch": "tsc -w -p .",
     "package": "npm run build && vsce package",
-    "sync:library": "node ./scripts/sync-bundled-library.js",
     "generate:hover-docs": "node ./scripts/generate-hover-doc-links.js",
     "check:hover-docs": "node ./scripts/check-hover-doc-links.js",
-    "test": "tsc -p . && node --test out/test/**/*.test.js && npm run check:hover-docs",
+    "test:unit": "tsc -p . && node --test out/test/**/*.test.js && npm run check:hover-docs",
+    "test": "npm run lint && npm run test:unit",
     "test:e2e": "tsc -p . && node ./out/test/e2e/runTest.js"
   },
   "dependencies": {
@@ -531,11 +533,15 @@
     "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.16.5",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^2.5.2",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
     "mocha": "^10.8.2",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.57.0"
   }
 }

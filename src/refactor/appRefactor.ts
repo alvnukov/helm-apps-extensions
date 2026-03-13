@@ -274,7 +274,7 @@ function findNearestKeyLine(lines: string[], from: number): number {
   return -1;
 }
 
-function findDirectAppChildLine(lines: string[], startLine: number, appLine: number, appIndent: number): number {
+function _findDirectAppChildLine(lines: string[], startLine: number, appLine: number, appIndent: number): number {
   const childIndent = appIndent + 2;
   for (let i = startLine; i >= appLine + 1; i -= 1) {
     const key = parseKey(lines[i]);
