@@ -5315,11 +5315,85 @@ function renderPreviewHtml(
       }
       .diff-item { font-size: 12px; margin-bottom: 4px; }
       .render-shell {
+        position: relative;
         border: 1px solid var(--border);
         border-radius: 14px;
         background: var(--surface);
         overflow: hidden;
         box-shadow: var(--shadow-soft);
+      }
+      .find-bar {
+        position: absolute;
+        top: 48px;
+        right: 14px;
+        z-index: 24;
+        width: min(460px, calc(100% - 28px));
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+        backdrop-filter: blur(10px);
+        box-shadow: var(--shadow-pop);
+      }
+      .find-bar[hidden] { display: none; }
+      .find-input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .find-input input {
+        font-size: 13px;
+      }
+      .find-count {
+        flex: 0 0 auto;
+        min-width: 58px;
+        text-align: right;
+        font-size: 11px;
+        letter-spacing: .04em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .find-count.empty {
+        color: var(--danger);
+      }
+      .find-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 0 0 auto;
+      }
+      .find-action {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        border-radius: 8px;
+        min-width: 30px;
+        height: 30px;
+        padding: 0 8px;
+        cursor: pointer;
+        font: inherit;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: border-color .16s ease, background-color .16s ease, color .16s ease;
+      }
+      .find-action:hover:not(:disabled) {
+        border-color: ${ui.controlHoverBorder};
+        background: var(--surface-4);
+      }
+      .find-action:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .find-action.active {
+        border-color: ${ui.controlFocusBorder};
+        background: ${ui.quickEnvHoverBg};
+        color: ${ui.title};
+      }
+      .find-action.close {
+        color: var(--muted);
       }
       .render {
         margin-top: 0;
@@ -5344,6 +5418,15 @@ function renderPreviewHtml(
       .y-comment { color: ${syntax.comment}; font-style: italic; }
       .y-string { color: ${syntax.string}; }
       .y-block { color: ${syntax.block}; font-weight: 600; }
+      .find-match {
+        background: color-mix(in srgb, ${ui.accent} 20%, transparent);
+        border-radius: 3px;
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, ${ui.accent} 26%, transparent);
+      }
+      .find-match.active {
+        background: color-mix(in srgb, ${ui.accent2} 34%, transparent);
+        box-shadow: inset 0 0 0 1px ${ui.accent2};
+      }
       details {
         margin: 0;
         border: 1px solid var(--border);
@@ -5373,6 +5456,11 @@ function renderPreviewHtml(
         .entity-popup {
           width: 100%;
           max-width: none;
+        }
+        .find-bar {
+          left: 12px;
+          right: 12px;
+          width: auto;
         }
         .entity-picker-grid {
           grid-template-columns: 1fr;
@@ -5432,12 +5520,26 @@ function renderPreviewHtml(
           <button id="renderModeValues" type="button" class="mode-tab ${renderModeValuesActive}" data-mode="values" role="tab" aria-selected="${renderModeValuesSelected}">values</button>
           <button id="renderModeManifest" type="button" class="mode-tab ${renderModeManifestActive}" data-mode="manifest" role="tab" aria-selected="${renderModeManifestSelected}">manifest</button>
         </div>
+        <div id="findBar" class="find-bar" hidden>
+          <div class="find-input">
+            <input id="findInput" type="text" value="" placeholder="find in preview" autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="findCount" class="find-count">0 / 0</div>
+          <div class="find-actions">
+            <button id="findCase" type="button" class="find-action" title="Match Case">Aa</button>
+            <button id="findPrev" type="button" class="find-action" title="Previous Match">↑</button>
+            <button id="findNext" type="button" class="find-action" title="Next Match">↓</button>
+            <button id="findClose" type="button" class="find-action close" title="Close Find">✕</button>
+          </div>
+        </div>
         <div class="render"><pre id="yamlPreview">${renderYamlHighlightedHtml(yamlText)}</pre></div>
       </div>
       ${details}
     </div>
     <script>
       const vscode = acquireVsCodeApi();
+      const rawYamlText = ${serializeJsonForInlineScript(yamlText)};
+      const persistedState = vscode.getState() || {};
       const options = ${optionsJson};
       const menu = ${menuJson};
       const envInput = document.getElementById("envInput");
@@ -5450,6 +5552,14 @@ function renderPreviewHtml(
       const entitySearch = document.getElementById("entitySearch");
       const groupMenu = document.getElementById("groupMenu");
       const appMenu = document.getElementById("appMenu");
+      const yamlPreview = document.getElementById("yamlPreview");
+      const findBar = document.getElementById("findBar");
+      const findInput = document.getElementById("findInput");
+      const findCount = document.getElementById("findCount");
+      const findCase = document.getElementById("findCase");
+      const findPrev = document.getElementById("findPrev");
+      const findNext = document.getElementById("findNext");
+      const findClose = document.getElementById("findClose");
       let selectedGroup = menu.selectedGroup;
       let selectedApp = menu.selectedApp;
       let pickerGroup = menu.selectedGroup;
@@ -5458,6 +5568,11 @@ function renderPreviewHtml(
       let selectedManifestBackend = options.manifestBackend === "helm" || options.manifestBackend === "werf"
         ? options.manifestBackend
         : "fast";
+      let findQuery = typeof persistedState.findQuery === "string" ? persistedState.findQuery : "";
+      let findCaseSensitive = persistedState.findCaseSensitive === true;
+      let findVisible = persistedState.findVisible === true;
+      let activeFindIndex = Number.isInteger(persistedState.activeFindIndex) ? persistedState.activeFindIndex : 0;
+      let renderedFindMatches = [];
 
       const emitDebounced = (() => {
         let timer;
@@ -5523,6 +5638,7 @@ function renderPreviewHtml(
       updateRenderModeTabs();
       syncEnvSelectWithInput();
       normalizeSelection();
+      initializeFind();
       if (entityTrigger && entityPopup && groupMenu && appMenu && entitySearch instanceof HTMLInputElement) {
         updateEntityLabel();
         renderEntityPicker();
@@ -5564,10 +5680,386 @@ function renderPreviewHtml(
         });
         document.addEventListener("click", closeEntityPopup);
         document.addEventListener("keydown", (event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+            event.preventDefault();
+            openFindBar(true);
+            return;
+          }
+          if (findVisible) {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeFindBar();
+              return;
+            }
+            if (event.key === "Enter" && document.activeElement === findInput) {
+              event.preventDefault();
+              navigateFind(event.shiftKey ? -1 : 1);
+              return;
+            }
+            if (event.key === "F3") {
+              event.preventDefault();
+              navigateFind(event.shiftKey ? -1 : 1);
+              return;
+            }
+          }
           if (event.key === "Escape") {
             closeEntityPopup();
           }
         });
+      }
+
+      function initializeFind() {
+        if (!(yamlPreview instanceof HTMLElement) || !(findInput instanceof HTMLInputElement) || !findBar) {
+          return;
+        }
+        findInput.value = findQuery;
+        updateFindCaseButton();
+        findInput.addEventListener("input", () => {
+          findQuery = findInput.value || "";
+          activeFindIndex = 0;
+          renderPreview();
+        });
+        findCase?.addEventListener("click", () => {
+          findCaseSensitive = !findCaseSensitive;
+          updateFindCaseButton();
+          activeFindIndex = 0;
+          renderPreview();
+        });
+        findPrev?.addEventListener("click", () => navigateFind(-1));
+        findNext?.addEventListener("click", () => navigateFind(1));
+        findClose?.addEventListener("click", () => closeFindBar());
+        renderPreview();
+        if (findVisible) {
+          openFindBar(false);
+        }
+      }
+
+      function openFindBar(prefillFromSelection) {
+        if (!(findInput instanceof HTMLInputElement) || !findBar) {
+          return;
+        }
+        if (prefillFromSelection) {
+          const selectedText = getSelectedPreviewText();
+          if (selectedText) {
+            findQuery = selectedText;
+            findInput.value = selectedText;
+            activeFindIndex = 0;
+          }
+        }
+        findVisible = true;
+        findBar.hidden = false;
+        renderPreview();
+        requestAnimationFrame(() => {
+          findInput.focus();
+          findInput.select();
+        });
+      }
+
+      function closeFindBar() {
+        if (!(findInput instanceof HTMLInputElement) || !findBar) {
+          return;
+        }
+        findVisible = false;
+        findBar.hidden = true;
+        findInput.blur();
+        renderPreview();
+      }
+
+      function renderPreview() {
+        if (!(yamlPreview instanceof HTMLElement)) {
+          return;
+        }
+        const matchGroups = [];
+        let nextMatchIndex = 0;
+        const html = rawYamlText
+          .split(/\\r?\\n/)
+          .map((line) => {
+            const segments = highlightYamlLineSegmentsClient(line);
+            if (!findVisible || findQuery.length === 0) {
+              return renderSegmentsWithoutFind(segments);
+            }
+            const lineText = segments.map((segment) => segment.text).join("");
+            const matches = collectLineMatches(lineText, findQuery, findCaseSensitive)
+              .map((match) => ({ ...match, index: nextMatchIndex++ }));
+            if (matches.length === 0) {
+              return renderSegmentsWithoutFind(segments);
+            }
+            matches.forEach((match) => {
+              matchGroups.push(match.index);
+            });
+            return renderSegmentsWithFind(segments, matches);
+          })
+          .join("\\n");
+        yamlPreview.innerHTML = html;
+        renderedFindMatches = buildRenderedFindMatches();
+        if (!findVisible || findQuery.length === 0) {
+          updateFindCount(0, 0);
+          syncFindButtons();
+          syncPreviewState();
+          return;
+        }
+        if (renderedFindMatches.length === 0) {
+          activeFindIndex = 0;
+          updateFindCount(0, 0);
+          syncFindButtons();
+          syncPreviewState();
+          return;
+        }
+        if (activeFindIndex >= renderedFindMatches.length) {
+          activeFindIndex = renderedFindMatches.length - 1;
+        }
+        if (activeFindIndex < 0) {
+          activeFindIndex = 0;
+        }
+        applyActiveFind(true);
+        syncFindButtons();
+        syncPreviewState();
+      }
+
+      function buildRenderedFindMatches() {
+        if (!(yamlPreview instanceof HTMLElement)) {
+          return [];
+        }
+        const grouped = new Map();
+        yamlPreview.querySelectorAll("[data-find-index]").forEach((node) => {
+          if (!(node instanceof HTMLElement)) {
+            return;
+          }
+          const index = Number(node.getAttribute("data-find-index"));
+          if (!Number.isFinite(index)) {
+            return;
+          }
+          const items = grouped.get(index) ?? [];
+          items.push(node);
+          grouped.set(index, items);
+        });
+        return Array.from(grouped.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, nodes]) => nodes);
+      }
+
+      function navigateFind(direction) {
+        if (renderedFindMatches.length === 0) {
+          return;
+        }
+        const total = renderedFindMatches.length;
+        activeFindIndex = (activeFindIndex + direction + total) % total;
+        applyActiveFind(false);
+        syncPreviewState();
+      }
+
+      function applyActiveFind(scrollIntoView) {
+        renderedFindMatches.forEach((nodes, index) => {
+          nodes.forEach((node) => {
+            node.classList.toggle("active", index === activeFindIndex);
+          });
+        });
+        const total = renderedFindMatches.length;
+        const current = total === 0 ? 0 : activeFindIndex + 1;
+        updateFindCount(current, total);
+        if (!scrollIntoView || total === 0) {
+          return;
+        }
+        const firstNode = renderedFindMatches[activeFindIndex]?.[0];
+        if (firstNode instanceof HTMLElement) {
+          firstNode.scrollIntoView({ block: "center", inline: "nearest" });
+        }
+      }
+
+      function updateFindCount(current, total) {
+        if (!(findCount instanceof HTMLElement)) {
+          return;
+        }
+        if (!findVisible || findQuery.length === 0) {
+          findCount.textContent = "0 / 0";
+          findCount.classList.remove("empty");
+          return;
+        }
+        if (total === 0) {
+          findCount.textContent = "no results";
+          findCount.classList.add("empty");
+          return;
+        }
+        findCount.textContent = String(current) + " / " + String(total);
+        findCount.classList.remove("empty");
+      }
+
+      function syncFindButtons() {
+        const hasMatches = renderedFindMatches.length > 0;
+        if (findPrev instanceof HTMLButtonElement) {
+          findPrev.disabled = !hasMatches;
+        }
+        if (findNext instanceof HTMLButtonElement) {
+          findNext.disabled = !hasMatches;
+        }
+      }
+
+      function updateFindCaseButton() {
+        if (!(findCase instanceof HTMLButtonElement)) {
+          return;
+        }
+        findCase.classList.toggle("active", findCaseSensitive);
+        findCase.setAttribute("aria-pressed", findCaseSensitive ? "true" : "false");
+      }
+
+      function syncPreviewState() {
+        vscode.setState({
+          findQuery,
+          findCaseSensitive,
+          findVisible,
+          activeFindIndex
+        });
+      }
+
+      function getSelectedPreviewText() {
+        if (!(yamlPreview instanceof HTMLElement)) {
+          return "";
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          return "";
+        }
+        const text = selection.toString().trim();
+        if (!text || text.length > 160) {
+          return "";
+        }
+        const range = selection.getRangeAt(0);
+        if (!yamlPreview.contains(range.commonAncestorContainer)) {
+          return "";
+        }
+        return text;
+      }
+
+      function collectLineMatches(text, query, caseSensitive) {
+        if (!query) {
+          return [];
+        }
+        const source = caseSensitive ? text : text.toLowerCase();
+        const needle = caseSensitive ? query : query.toLowerCase();
+        const matches = [];
+        let cursor = 0;
+        while (cursor <= source.length - needle.length) {
+          const index = source.indexOf(needle, cursor);
+          if (index === -1) {
+            break;
+          }
+          matches.push({ start: index, end: index + needle.length });
+          cursor = index + Math.max(needle.length, 1);
+        }
+        return matches;
+      }
+
+      function renderSegmentsWithoutFind(segments) {
+        return segments.map((segment) => renderSegmentText(segment.text, segment.className)).join("");
+      }
+
+      function renderSegmentsWithFind(segments, matches) {
+        let absoluteOffset = 0;
+        let matchPointer = 0;
+        let html = "";
+        for (const segment of segments) {
+          const segmentStart = absoluteOffset;
+          const segmentEnd = segmentStart + segment.text.length;
+          let cursor = segmentStart;
+          while (cursor < segmentEnd) {
+            while (matchPointer < matches.length && matches[matchPointer].end <= cursor) {
+              matchPointer += 1;
+            }
+            const match = matches[matchPointer];
+            if (!match || match.start >= segmentEnd || match.end <= cursor) {
+              html += renderSegmentText(segment.text.slice(cursor - segmentStart), segment.className);
+              cursor = segmentEnd;
+              continue;
+            }
+            if (match.start > cursor) {
+              html += renderSegmentText(
+                segment.text.slice(cursor - segmentStart, match.start - segmentStart),
+                segment.className,
+              );
+              cursor = match.start;
+            }
+            const sliceEnd = Math.min(segmentEnd, match.end);
+            html += renderFindSegmentText(
+              segment.text.slice(cursor - segmentStart, sliceEnd - segmentStart),
+              segment.className,
+              match.index,
+            );
+            cursor = sliceEnd;
+          }
+          absoluteOffset = segmentEnd;
+        }
+        return html;
+      }
+
+      function renderSegmentText(text, className) {
+        if (!text) {
+          return "";
+        }
+        const escaped = escapeHtmlClient(text);
+        return className ? '<span class="' + className + '">' + escaped + '</span>' : escaped;
+      }
+
+      function renderFindSegmentText(text, className, matchIndex) {
+        if (!text) {
+          return "";
+        }
+        const content = className
+          ? '<span class="' + className + '">' + escapeHtmlClient(text) + '</span>'
+          : escapeHtmlClient(text);
+        return '<mark class="find-match" data-find-index="' + String(matchIndex) + '">' + content + "</mark>";
+      }
+
+      function highlightYamlLineSegmentsClient(line) {
+        const commentIdx = line.indexOf("#");
+        let code = line;
+        let comment = "";
+        if (commentIdx >= 0) {
+          code = line.slice(0, commentIdx);
+          comment = line.slice(commentIdx);
+        }
+        const keyMatch = code.match(/^(\\s*)([^:#\\n][^:\\n]*):(\\s*)(.*)$/);
+        if (keyMatch) {
+          const segments = [];
+          if (keyMatch[1]) segments.push({ text: keyMatch[1] });
+          segments.push({ text: keyMatch[2], className: "y-key" });
+          segments.push({ text: ":" });
+          if (keyMatch[3]) segments.push({ text: keyMatch[3] });
+          const rawVal = keyMatch[4] ?? "";
+          if (rawVal) {
+            const trimmed = rawVal.trim();
+            let className = "";
+            if (trimmed === "|" || trimmed === "|-" || trimmed === ">") {
+              className = "y-block";
+            } else if (/^(true|false|null)$/.test(trimmed)) {
+              className = "y-bool";
+            } else if (/^-?\\d+(\\.\\d+)?$/.test(trimmed)) {
+              className = "y-num";
+            } else if (/^['\"].*['\"]$/.test(trimmed)) {
+              className = "y-string";
+            }
+            segments.push(className ? { text: rawVal, className } : { text: rawVal });
+          }
+          if (comment) {
+            segments.push({ text: comment, className: "y-comment" });
+          }
+          return segments;
+        }
+        if (comment && code.trim().length === 0) {
+          return [{ text: comment, className: "y-comment" }];
+        }
+        const segments = [];
+        if (code) segments.push({ text: code });
+        if (comment) segments.push({ text: comment, className: "y-comment" });
+        return segments.length > 0 ? segments : [{ text: "" }];
+      }
+
+      function escapeHtmlClient(value) {
+        return value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
       function normalizeSelection() {

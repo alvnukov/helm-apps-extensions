@@ -131,7 +131,10 @@ function resolveBackends(value) {
   if (normalized === "both") {
     return ["helm", "werf"];
   }
-  if (normalized === "helm" || normalized === "werf") {
+  if (normalized === "all") {
+    return ["fast", "helm", "werf"];
+  }
+  if (normalized === "fast" || normalized === "helm" || normalized === "werf") {
     return [normalized];
   }
   throw new Error(`unsupported backend: ${normalized}`);
@@ -144,7 +147,7 @@ function resolvePositiveInt(value, fallback) {
 
 function printUsage() {
   process.stderr.write(
-    "usage: node scripts/sweep-manifest-preview.js --file <values.yaml> [--env <env>] [--backend helm|werf|both] [--happ-path <bin>]\n",
+    "usage: node scripts/sweep-manifest-preview.js --file <values.yaml> [--env <env>] [--backend fast|helm|werf|both|all] [--happ-path <bin>] [--request-timeout-ms <ms>]\n",
   );
 }
 
