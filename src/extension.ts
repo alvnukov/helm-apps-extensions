@@ -30,16 +30,8 @@ import {
 import { collectSymbolOccurrences, findSymbolAtPosition, type SymbolRef } from "./language/symbols";
 import { discoverEnvironments, findAppScopeAtLine, resolveEnvMaps, type EnvironmentDiscovery } from "./preview/includeResolver";
 import {
-  buildManifestEntityIsolationSetValues,
-  buildManifestEntityIsolationSetValuesFromEnabledEntities,
   forceEntityEnabled,
-  withManifestRenderEntityEnabled,
 } from "./preview/entityRenderOverrides";
-import {
-  buildManifestBackendArgs as buildManifestBackendArgsForCommand,
-  resolveManifestBackendCommand as resolveManifestBackendCommandForConfig,
-  selectManifestValuesFiles,
-} from "./preview/manifestBackend";
 import {
   buildPreviewEntityMenuModel,
   buildPreviewEntityMenuModelFromGroups,
@@ -2630,99 +2622,6 @@ async function renderManifest(
   return await renderManifestFromHappLsp(document, documentText, state);
 }
 
-async function renderManifestFromHelmOrWerf(
-  document: vscode.TextDocument,
-  documentText: string,
-  state: EntityPreviewState,
-  backend: "helm" | "werf",
-  resolvedEnabledEntities?: ReadonlyArray<{ group: string; app: string }>,
-): Promise<string> {
-  const chartYaml = await findNearestChartYaml(document.uri.fsPath);
-  if (!chartYaml) {
-    throw new Error(`Chart.yaml not found for values file: ${document.uri.fsPath}`);
-  }
-
-  const chartDir = path.dirname(chartYaml.fsPath);
-  const manifestWorkDir = backend === "werf"
-    ? await resolveWerfProjectDir(chartDir)
-    : chartDir;
-
-  try {
-    const valuesFiles = await resolveManifestValuesFiles(document, chartDir);
-    const isolationSetValues = resolvedEnabledEntities && resolvedEnabledEntities.length > 0
-      ? buildManifestEntityIsolationSetValuesFromEnabledEntities(
-        resolvedEnabledEntities,
-        state.group,
-        state.app,
-      )
-      : buildManifestEntityIsolationSetValues(
-        documentText,
-        state.group,
-        state.app,
-      );
-    if (!isolationSetValues) {
-      throw new Error(`unable to isolate entity ${state.group}.${state.app} for manifest render`);
-    }
-    const configuredHelmPath = getExtensionConfig().get<string>("helmPath", "helm");
-    const command = resolveManifestBackendCommandForConfig(backend, configuredHelmPath);
-    const args = buildManifestBackendArgsForCommand(
-      backend,
-      backend === "werf" ? manifestWorkDir : chartDir,
-      valuesFiles,
-      isolationSetValues,
-      state.options.env,
-    );
-    const { stdout, stderr } = await execFileAsync(command, args, {
-      cwd: manifestWorkDir,
-      timeout: 240000,
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    const text = String(stdout ?? "").trim();
-    if (text.length === 0) {
-      const details = String(stderr ?? "").trim();
-      throw new Error(details.length > 0 ? details : `${backend} render returned empty output`);
-    }
-    return text.endsWith("\n") ? text : `${text}\n`;
-  } catch (err) {
-    const prefix = backend === "helm" ? "helm template failed" : "werf render failed";
-    throw new Error(`${prefix}: ${extractErrorMessage(err)}`);
-  }
-}
-
-async function resolveWerfProjectDir(chartDir: string): Promise<string> {
-  let current = chartDir;
-  while (true) {
-    const configPath = path.join(current, "werf.yaml");
-    try {
-      await access(configPath, fsConstants.R_OK);
-      return current;
-    } catch {
-      // continue walking up
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return chartDir;
-    }
-    current = parent;
-  }
-}
-
-async function resolveManifestValuesFiles(
-  document: vscode.TextDocument,
-  chartDir: string,
-): Promise<string[]> {
-  const currentPath = path.resolve(document.uri.fsPath);
-  const rootDocs = await findHelmAppsRootDocuments(chartDir);
-  const primaryValues = await findPrimaryValuesFileForChart(chartDir);
-  const includeOwners = await collectIncludeOwnersForChart(chartDir);
-  return selectManifestValuesFiles({
-    currentPath,
-    rootDocuments: rootDocs,
-    primaryValues,
-    includeOwners: [...(includeOwners.get(currentPath) ?? [])],
-  });
-}
-
 async function findPrimaryValuesFileForChart(chartDir: string): Promise<string | undefined> {
   const candidates = [path.join(chartDir, "values.yaml"), path.join(chartDir, "values.yml")];
   for (const candidate of candidates) {
@@ -4528,68 +4427,6 @@ async function collectIncludeFilesForChart(chartDir: string): Promise<Set<string
   return new Set(discovered);
 }
 
-async function collectIncludeOwnersForChart(chartDir: string): Promise<Map<string, Set<string>>> {
-  const now = Date.now();
-  const cached = includeOwnersByChartCache.get(chartDir);
-  if (cached && now - cached.scannedAt <= INCLUDE_FILE_CACHE_TTL_MS) {
-    return cloneIncludeOwnersMap(cached.owners);
-  }
-
-  const owners = new Map<string, Set<string>>();
-  const roots = (await findHelmAppsRootDocuments(chartDir)).map((current) => path.resolve(current));
-  for (const root of roots) {
-    const visited = new Set<string>();
-    const queue: string[] = [root];
-    while (queue.length > 0) {
-      const current = path.resolve(String(queue.pop() ?? ""));
-      if (current.length === 0 || visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-
-      let text = "";
-      try {
-         
-        text = await readFile(current, "utf8");
-      } catch {
-        continue;
-      }
-
-      const refs = collectIncludeFileRefs(text);
-      const baseDir = path.dirname(current);
-      for (const ref of refs) {
-        if (isTemplatedIncludePath(ref.path)) {
-          continue;
-        }
-        const candidates = buildIncludeCandidates(ref.path, baseDir);
-        for (const candidate of candidates) {
-          const includedPath = path.resolve(candidate);
-          try {
-             
-            await access(includedPath, fsConstants.R_OK);
-            if (!owners.has(includedPath)) {
-              owners.set(includedPath, new Set<string>());
-            }
-            owners.get(includedPath)?.add(root);
-            if (!visited.has(includedPath)) {
-              queue.push(includedPath);
-            }
-            break;
-          } catch {
-            // try next candidate
-          }
-        }
-      }
-    }
-  }
-
-  includeOwnersByChartCache.set(chartDir, {
-    scannedAt: now,
-    owners: cloneIncludeOwnersMap(owners),
-  });
-  return owners;
-}
-
 async function collectIncludeContextsForChart(chartDir: string): Promise<Map<string, IncludeReferenceContext[]>> {
   const now = Date.now();
   const cached = includeContextsByChartCache.get(chartDir);
@@ -4666,14 +4503,6 @@ async function collectIncludeContextsForChart(chartDir: string): Promise<Map<str
     contexts: cloneIncludeContextsMap(contexts),
   });
   return contexts;
-}
-
-function cloneIncludeOwnersMap(source: Map<string, Set<string>>): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  for (const [key, owners] of source) {
-    out.set(key, new Set<string>(owners));
-  }
-  return out;
 }
 
 function cloneIncludeContextsMap(source: Map<string, IncludeReferenceContext[]>): Map<string, IncludeReferenceContext[]> {

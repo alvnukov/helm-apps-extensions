@@ -2,13 +2,8 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
-const { spawn, execFile } = require("node:child_process");
-const { promisify } = require("node:util");
+const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const YAML = require("yaml");
-
-const execFileAsync = promisify(execFile);
-const IGNORE_DIRS = new Set([".git", "node_modules", "vendor", "tmp", ".werf", "templates"]);
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -123,396 +118,6 @@ async function findNearestChartYaml(fromFile) {
   }
 }
 
-async function resolveWerfProjectDir(chartDir) {
-  let current = chartDir;
-  while (true) {
-    const configPath = path.join(current, "werf.yaml");
-    try {
-      await fsp.access(configPath, fs.constants.R_OK);
-      return current;
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) {
-        return chartDir;
-      }
-      current = parent;
-    }
-  }
-}
-
-async function resolveManifestValuesFiles(currentPath, chartDir) {
-  const rootDocuments = await findHelmAppsRootDocuments(chartDir);
-  const primaryValues = await findPrimaryValuesFileForChart(chartDir);
-  const includeOwners = await collectIncludeOwnersForChart(chartDir);
-  return selectManifestValuesFiles({
-    currentPath,
-    rootDocuments,
-    primaryValues,
-    includeOwners: [...(includeOwners.get(path.resolve(currentPath)) || [])],
-  });
-}
-
-async function findPrimaryValuesFileForChart(chartDir) {
-  for (const candidate of [path.join(chartDir, "values.yaml"), path.join(chartDir, "values.yml")]) {
-    try {
-      await fsp.access(candidate, fs.constants.R_OK);
-      return path.resolve(candidate);
-    } catch {}
-  }
-  return undefined;
-}
-
-async function findHelmAppsRootDocuments(chartDir) {
-  const files = [];
-  await walkYamlFiles(chartDir, files);
-  const documents = [];
-  for (const filePath of files) {
-    try {
-      documents.push({
-        filePath,
-        text: await fsp.readFile(filePath, "utf8"),
-      });
-    } catch {}
-  }
-  return selectHelmAppsRootDocuments(documents);
-}
-
-async function walkYamlFiles(dir, out) {
-  const entries = await fsp.readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (!IGNORE_DIRS.has(entry.name)) {
-        await walkYamlFiles(fullPath, out);
-      }
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
-    const lower = entry.name.toLowerCase();
-    if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
-      out.push(path.resolve(fullPath));
-    }
-  }
-}
-
-function looksLikeHelmAppsValuesText(text) {
-  if (/\n?global:\s*/m.test(text) && /(?:^|\n)\s*_includes:\s*/m.test(text)) {
-    return true;
-  }
-  if (/\n?global:\s*/m.test(text) && /(?:^|\n)\s*releases:\s*/m.test(text)) {
-    return true;
-  }
-  if (/(?:^|\n)apps-[a-z0-9-]+:\s*/m.test(text)) {
-    return true;
-  }
-  if (/(?:^|\n)\s*__GroupVars__:\s*/m.test(text)) {
-    return true;
-  }
-  return false;
-}
-
-function selectHelmAppsRootDocuments(files) {
-  const candidateRoots = new Set();
-  const includedByOtherDocuments = new Set();
-
-  for (const file of files) {
-    const resolvedFilePath = path.resolve(file.filePath);
-    if (looksLikeHelmAppsValuesText(file.text)) {
-      candidateRoots.add(resolvedFilePath);
-    }
-
-    const baseDir = path.dirname(resolvedFilePath);
-    for (const ref of collectIncludeFileRefs(file.text)) {
-      for (const candidatePath of buildIncludeCandidates(ref.path, baseDir)) {
-        const resolvedCandidatePath = path.resolve(candidatePath);
-        if (resolvedCandidatePath !== resolvedFilePath) {
-          includedByOtherDocuments.add(resolvedCandidatePath);
-        }
-      }
-    }
-  }
-
-  return [...candidateRoots].filter((filePath) => !includedByOtherDocuments.has(filePath)).sort();
-}
-
-async function collectIncludeOwnersForChart(chartDir) {
-  const owners = new Map();
-  const roots = (await findHelmAppsRootDocuments(chartDir)).map((current) => path.resolve(current));
-
-  for (const root of roots) {
-    const visited = new Set();
-    const queue = [root];
-    while (queue.length > 0) {
-      const current = path.resolve(String(queue.pop() || ""));
-      if (!current || visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-
-      let text = "";
-      try {
-        text = await fsp.readFile(current, "utf8");
-      } catch {
-        continue;
-      }
-
-      const baseDir = path.dirname(current);
-      for (const ref of collectIncludeFileRefs(text)) {
-        if (isTemplatedIncludePath(ref.path)) {
-          continue;
-        }
-        for (const candidate of buildIncludeCandidates(ref.path, baseDir)) {
-          const includedPath = path.resolve(candidate);
-          try {
-            await fsp.access(includedPath, fs.constants.R_OK);
-            if (!owners.has(includedPath)) {
-              owners.set(includedPath, new Set());
-            }
-            owners.get(includedPath).add(root);
-            if (!visited.has(includedPath)) {
-              queue.push(includedPath);
-            }
-            break;
-          } catch {}
-        }
-      }
-    }
-  }
-
-  return owners;
-}
-
-function collectIncludeFileRefs(text) {
-  const lines = text.split(/\r?\n/);
-  const refs = [];
-  const keyStack = [];
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const keyMatch = line.match(/^(\s*)(_include_from_file|_include_files):\s*(.*)$/);
-    if (!keyMatch) {
-      const anyKeyMatch = line.match(/^(\s*)([A-Za-z0-9_.-]+):\s*(.*)$/);
-      if (anyKeyMatch) {
-        const indent = anyKeyMatch[1].length;
-        while (keyStack.length > 0 && keyStack[keyStack.length - 1].indent >= indent) {
-          keyStack.pop();
-        }
-        keyStack.push({ indent, key: anyKeyMatch[2] });
-      }
-      continue;
-    }
-    const indent = keyMatch[1].length;
-    const key = keyMatch[2];
-    const tail = keyMatch[3].trim();
-    while (keyStack.length > 0 && keyStack[keyStack.length - 1].indent >= indent) {
-      keyStack.pop();
-    }
-    keyStack.push({ indent, key });
-
-    if (key === "_include_from_file") {
-      const value = unquote(tail);
-      if (value && !isTemplatedIncludePath(value)) {
-        refs.push({ path: value, line: i });
-      }
-      continue;
-    }
-
-    if (tail.startsWith("[") && tail.endsWith("]")) {
-      for (const part of tail.slice(1, -1).split(",")) {
-        const value = unquote(part.trim());
-        if (value && !isTemplatedIncludePath(value)) {
-          refs.push({ path: value, line: i });
-        }
-      }
-      continue;
-    }
-
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const sub = lines[j];
-      const trimmed = sub.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
-        continue;
-      }
-      const subIndent = countIndent(sub);
-      if (subIndent <= indent) {
-        break;
-      }
-      const item = sub.match(/^\s*-\s+(.+)\s*$/);
-      if (item) {
-        const value = unquote(item[1].trim());
-        if (value && !isTemplatedIncludePath(value)) {
-          refs.push({ path: value, line: j });
-        }
-      }
-    }
-  }
-
-  return refs;
-}
-
-function buildIncludeCandidates(rawPath, baseDir) {
-  if (path.isAbsolute(rawPath)) {
-    return [rawPath];
-  }
-  return [path.resolve(baseDir, rawPath)];
-}
-
-function isTemplatedIncludePath(value) {
-  return value.includes("{{") || value.includes("}}");
-}
-
-function unquote(value) {
-  const trimmed = String(value || "").trim();
-  if (trimmed.length < 2) {
-    return trimmed;
-  }
-  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function countIndent(line) {
-  const match = line.match(/^\s*/);
-  return match ? match[0].length : 0;
-}
-
-function selectManifestValuesFiles(input) {
-  const currentPath = path.resolve(input.currentPath);
-  const normalizedRoots = new Set(input.rootDocuments.map((current) => path.resolve(current)));
-  const primaryValues = input.primaryValues ? path.resolve(input.primaryValues) : undefined;
-  const ownerCandidates = [...(input.includeOwners || [])]
-    .map((current) => path.resolve(current))
-    .sort((a, b) => a.localeCompare(b));
-
-  if (ownerCandidates.length > 0) {
-    if (primaryValues && ownerCandidates.includes(primaryValues)) {
-      return [primaryValues];
-    }
-    return [ownerCandidates[0]];
-  }
-  if (normalizedRoots.has(currentPath)) {
-    if (primaryValues && currentPath !== primaryValues) {
-      return [primaryValues];
-    }
-    return [currentPath];
-  }
-  if (primaryValues) {
-    return [primaryValues];
-  }
-  return [currentPath];
-}
-
-function buildManifestEntityIsolationSetValues(documentText, group, app) {
-  const text = documentText || "";
-  if (!text.trim()) {
-    return null;
-  }
-  try {
-    const parsed = YAML.parse(text);
-    if (!isMap(parsed)) {
-      return [`${escapeHelmSetPathSegment(group)}.${escapeHelmSetPathSegment(app)}.enabled=true`];
-    }
-    const overrides = [];
-    let targetFound = false;
-    for (const [groupName, groupValue] of Object.entries(parsed)) {
-      if (groupName === "global" || !isMap(groupValue)) {
-        continue;
-      }
-      for (const [appName, appValue] of Object.entries(groupValue)) {
-        if (appName === "__GroupVars__" || !isMap(appValue)) {
-          continue;
-        }
-        if (groupName === group && appName === app) {
-          targetFound = true;
-          overrides.push(`${escapeHelmSetPathSegment(groupName)}.${escapeHelmSetPathSegment(appName)}.enabled=true`);
-          continue;
-        }
-        if (typeof appValue.enabled === "boolean" && appValue.enabled === true) {
-          overrides.push(`${escapeHelmSetPathSegment(groupName)}.${escapeHelmSetPathSegment(appName)}.enabled=false`);
-        }
-      }
-    }
-    if (!targetFound) {
-      return [`${escapeHelmSetPathSegment(group)}.${escapeHelmSetPathSegment(app)}.enabled=true`];
-    }
-    return overrides;
-  } catch {
-    return [`${escapeHelmSetPathSegment(group)}.${escapeHelmSetPathSegment(app)}.enabled=true`];
-  }
-}
-
-function buildManifestEntityIsolationSetValuesFromEnabledEntities(enabledEntities, group, app) {
-  const setValues = [`${escapeHelmSetPathSegment(group)}.${escapeHelmSetPathSegment(app)}.enabled=true`];
-  const seen = new Set([`${group}\u0000${app}`]);
-  for (const entity of enabledEntities) {
-    const groupName = String(entity.group || "").trim();
-    const appName = String(entity.app || "").trim();
-    if (!groupName || !appName) {
-      continue;
-    }
-    const key = `${groupName}\u0000${appName}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    setValues.push(`${escapeHelmSetPathSegment(groupName)}.${escapeHelmSetPathSegment(appName)}.enabled=false`);
-  }
-  return setValues;
-}
-
-function escapeHelmSetPathSegment(segment) {
-  return String(segment)
-    .replace(/\\/g, "\\\\")
-    .replace(/\./g, "\\.")
-    .replace(/,/g, "\\,")
-    .replace(/=/g, "\\=")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
-}
-
-function resolveManifestBackendCommand(backend, configuredHelmPath) {
-  const configured = String(configuredHelmPath || "").trim();
-  const configuredBinary = path.basename(configured).toLowerCase();
-  if (backend === "werf") {
-    if (configured && configuredBinary === "werf") {
-      return configured;
-    }
-    return "werf";
-  }
-  if (configured && configuredBinary !== "werf") {
-    return configured;
-  }
-  return "helm";
-}
-
-function buildManifestBackendArgs(backend, chartDir, valuesFiles, isolationSetValues, env) {
-  const valueArgs = valuesFiles
-    .map((current) => String(current || "").trim())
-    .filter(Boolean)
-    .flatMap((current) => ["--values", current]);
-  const setArgs = isolationSetValues
-    .map((current) => String(current || "").trim())
-    .filter(Boolean)
-    .flatMap((current) => ["--set", current]);
-  const normalizedEnv = String(env || "").trim();
-  const withEnvSet = (base) => normalizedEnv
-    ? [...base, "--set-string", `global.env=${normalizedEnv}`]
-    : base;
-
-  if (backend === "werf") {
-    const args = ["render", "--dir", chartDir, "--dev", "--ignore-secret-key", ...valueArgs, ...setArgs];
-    if (normalizedEnv) {
-      args.push("--env", normalizedEnv);
-    }
-    return withEnvSet(args);
-  }
-
-  return withEnvSet(["template", "helm-apps-preview", chartDir, ...valueArgs, ...setArgs]);
-}
-
 function printPlan(plan) {
   process.stderr.write(
     [
@@ -531,10 +136,6 @@ function printPlan(plan) {
 
 function ensureTrailingNewline(text) {
   return text.endsWith("\n") ? text : `${text}\n`;
-}
-
-function isMap(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 class HappLspSession {
@@ -588,10 +189,14 @@ class HappLspSession {
     }
     try {
       await this.request("shutdown", null);
-    } catch {}
+    } catch (_error) {
+      void _error;
+    }
     try {
       this.notify("exit", null);
-    } catch {}
+    } catch (_error) {
+      void _error;
+    }
     await new Promise((resolve) => {
       const proc = this.proc;
       if (!proc) {
@@ -602,7 +207,9 @@ class HappLspSession {
       setTimeout(() => {
         try {
           proc.kill("SIGTERM");
-        } catch {}
+        } catch (_error) {
+          void _error;
+        }
         resolve();
       }, 300);
     });

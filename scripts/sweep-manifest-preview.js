@@ -237,10 +237,14 @@ class HappLspSession {
     }
     try {
       await this.request("shutdown", null);
-    } catch {}
+    } catch (_error) {
+      void _error;
+    }
     try {
       this.notify("exit", null);
-    } catch {}
+    } catch (_error) {
+      void _error;
+    }
     await new Promise((resolve) => {
       const proc = this.proc;
       if (!proc) {
@@ -251,7 +255,9 @@ class HappLspSession {
       setTimeout(() => {
         try {
           proc.kill("SIGTERM");
-        } catch {}
+        } catch (_error) {
+          void _error;
+        }
         resolve();
       }, 300);
     });
@@ -270,7 +276,9 @@ class HappLspSession {
     }
     try {
       proc.kill("SIGKILL");
-    } catch {}
+    } catch (_error) {
+      void _error;
+    }
     await new Promise((resolve) => {
       proc.once("exit", () => resolve());
       setTimeout(resolve, 300);
