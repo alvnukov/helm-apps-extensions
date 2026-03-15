@@ -67,11 +67,12 @@ jobs:
         id: vsix
         run: |
           set -euo pipefail
-          file="$(ls -1 *.vsix | head -n 1)"
+          file="$(find . -maxdepth 1 -type f -name '*.vsix' -print -quit)"
           if [ -z "${file}" ]; then
             echo "VSIX file not found"
             exit 1
           fi
+          file="${file#./}"
           echo "file=${file}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload VSIX artifact
