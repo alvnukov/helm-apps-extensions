@@ -19,9 +19,14 @@ intellij {
   version.set("2025.3.3")
 }
 
+java {
+  sourceCompatibility = JavaVersion.VERSION_17
+  targetCompatibility = JavaVersion.VERSION_17
+}
+
 tasks {
   patchPluginXml {
-    sinceBuild.set("252")
+    sinceBuild.set("253")
     untilBuild.set("253.*")
   }
 
