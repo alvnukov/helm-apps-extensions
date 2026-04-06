@@ -477,12 +477,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("helm-apps.configureSchema", async () => {
-      await configureSchema(context);
-    }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand("helm-apps.validateCurrentFile", async () => {
       await validateCurrentFile();
     }),
@@ -735,7 +729,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  void configureSchemaOnStartup(context);
+  void cleanupYamlSchemaMappingsOnStartup(context);
   valuesStructure.setDocument(vscode.window.activeTextEditor?.document);
   void refreshHelmAppsLanguageDocumentContext(vscode.window.activeTextEditor);
   scheduleInsertTemplateContextRefresh(vscode.window.activeTextEditor, 0);
@@ -981,60 +975,57 @@ function firstDefinitionLocation(
   return new vscode.Location(first.targetUri, first.targetSelectionRange ?? first.targetRange);
 }
 
-async function configureSchema(context: vscode.ExtensionContext, silent = false): Promise<void> {
-  const manualFileMatch = vscode.workspace.getConfiguration("helm-apps").get<string[]>("schemaFileMatch", []);
-  const rawFileMatch = manualFileMatch.length > 0 ? manualFileMatch : await discoverHelmAppsSchemaTargets();
-  const fileMatch = rawFileMatch.filter((filePath) => !isWerfSecretValuesFilePath(filePath));
+async function cleanupYamlSchemaMappingsOnStartup(context: vscode.ExtensionContext): Promise<void> {
+  const extensionSchemaUri = vscode.Uri.file(path.join(context.extensionPath, "schemas", "values.schema.json")).toString();
+  const errors: string[] = [];
 
-  const yamlConfig = vscode.workspace.getConfiguration("yaml");
-  const current = (yamlConfig.get<Record<string, string[]>>("schemas") ?? {}) as Record<string, string[]>;
-
-  const schemaUri = vscode.Uri.file(path.join(context.extensionPath, "schemas", "values.schema.json")).toString();
-  const next = { ...current };
-  for (const existingSchemaUri of Object.keys(next)) {
-    if (shouldReplaceLegacyHelmAppsSchema(existingSchemaUri, schemaUri)) {
-      delete next[existingSchemaUri];
-    }
-  }
-  if (fileMatch.length > 0) {
-    next[schemaUri] = fileMatch;
-  } else {
-    delete next[schemaUri];
-  }
-
-  if (jsonStringifyStable(current) === jsonStringifyStable(next)) {
-    return;
-  }
-
+  const workspaceConfig = vscode.workspace.getConfiguration("yaml");
   try {
-    await yamlConfig.update("schemas", next, vscode.ConfigurationTarget.Workspace);
-    await configureYamlHoverBehavior();
-    await configureYamlSuggestionBehavior();
+    await cleanupYamlSchemaMappingsForScope(
+      workspaceConfig,
+      vscode.ConfigurationTarget.Workspace,
+      extensionSchemaUri,
+    );
   } catch (err) {
-    const message = extractErrorMessage(err);
-    if (!silent) {
-      void vscode.window.showWarningMessage(`helm-apps: unable to configure YAML schema automatically: ${message}`);
-    }
-    return;
+    errors.push(`workspace: ${extractErrorMessage(err)}`);
   }
 
-  if (!silent) {
-    void vscode.window.showInformationMessage(
-      fileMatch.length > 0
-        ? `helm-apps schema configured for ${fileMatch.length} file(s)`
-        : "helm-apps schema mapping cleared (no helm-apps charts detected)",
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const folderConfig = vscode.workspace.getConfiguration("yaml", folder.uri);
+    try {
+      await cleanupYamlSchemaMappingsForScope(
+        folderConfig,
+        vscode.ConfigurationTarget.WorkspaceFolder,
+        extensionSchemaUri,
+      );
+    } catch (err) {
+      errors.push(`${folder.name}: ${extractErrorMessage(err)}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    void vscode.window.showWarningMessage(
+      `helm-apps: unable to clear YAML schema mapping automatically (${errors.join("; ")})`,
     );
   }
 }
 
-async function configureSchemaOnStartup(context: vscode.ExtensionContext): Promise<void> {
-  const yamlConfig = vscode.workspace.getConfiguration("yaml");
+async function cleanupYamlSchemaMappingsForScope(
+  yamlConfig: vscode.WorkspaceConfiguration,
+  target: vscode.ConfigurationTarget,
+  extensionSchemaUri: string,
+): Promise<void> {
   const current = (yamlConfig.get<Record<string, string[]>>("schemas") ?? {}) as Record<string, string[]>;
-  const activeSchemaUri = vscode.Uri.file(path.join(context.extensionPath, "schemas", "values.schema.json")).toString();
-  if (current[activeSchemaUri]) {
+  const next: Record<string, string[]> = {};
+  for (const [schemaUri, fileMatch] of Object.entries(current)) {
+    if (!shouldRemoveHelmAppsSchemaMapping(schemaUri, extensionSchemaUri)) {
+      next[schemaUri] = fileMatch;
+    }
+  }
+  if (jsonStringifyStable(current) === jsonStringifyStable(next)) {
     return;
   }
-  await configureSchema(context, true);
+  await yamlConfig.update("schemas", next, target);
 }
 
 function jsonStringifyStable(value: unknown): string {
@@ -1048,9 +1039,9 @@ function jsonStringifyStable(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function shouldReplaceLegacyHelmAppsSchema(existingSchemaUri: string, activeSchemaUri: string): boolean {
-  if (existingSchemaUri === activeSchemaUri) {
-    return false;
+function shouldRemoveHelmAppsSchemaMapping(existingSchemaUri: string, extensionSchemaUri: string): boolean {
+  if (existingSchemaUri === extensionSchemaUri) {
+    return true;
   }
   let uri: vscode.Uri;
   try {
@@ -1062,43 +1053,15 @@ function shouldReplaceLegacyHelmAppsSchema(existingSchemaUri: string, activeSche
     return false;
   }
   const fsPath = uri.fsPath.replace(/\\/g, "/").toLowerCase();
-  if (!fsPath.endsWith("/schemas/values.schema.json")) {
+  if (!fsPath.endsWith("/values.schema.json")) {
     return false;
   }
-  // Replace stale schema mappings from old helm-apps extension locations.
+  // Remove stale helm-apps schema mappings from extension installs and chart-local .helm files.
   return fsPath.includes("/extensions/helm-apps/")
     || fsPath.includes("/helm-apps-extensions/")
+    || fsPath.includes("/.helm/")
+    || fsPath.includes("/helm-apps")
     || (fsPath.includes("/.vscode/extensions/") && fsPath.includes("helm-apps"));
-}
-
-async function configureYamlHoverBehavior(): Promise<void> {
-  const disableSchemaHover = vscode.workspace
-    .getConfiguration("helm-apps")
-    .get<boolean>("disableYamlSchemaHover", true);
-  if (!disableSchemaHover) {
-    return;
-  }
-  const yamlConfig = vscode.workspace.getConfiguration("yaml");
-  const current = yamlConfig.get<boolean>("hover");
-  if (current !== false) {
-    await yamlConfig.update("hover", false, vscode.ConfigurationTarget.Workspace);
-  }
-}
-
-async function configureYamlSuggestionBehavior(): Promise<void> {
-  const rootConfig = vscode.workspace.getConfiguration();
-  const current = (rootConfig.get<Record<string, unknown>>("[yaml]") ?? {}) as Record<string, unknown>;
-  if (current["editor.suggest.showSnippets"] === false) {
-    return;
-  }
-  await rootConfig.update(
-    "[yaml]",
-    {
-      ...current,
-      "editor.suggest.showSnippets": false,
-    },
-    vscode.ConfigurationTarget.Workspace,
-  );
 }
 
 async function openLibrarySettingsPanel(editor: vscode.TextEditor): Promise<void> {
@@ -4265,40 +4228,6 @@ function provideFieldHover(document: vscode.TextDocument, position: vscode.Posit
   md.isTrusted = false;
   md.appendMarkdown(buildFieldDocMarkdownLocalized(path, doc, vscode.env.language));
   return new vscode.Hover(md);
-}
-
-async function discoverHelmAppsSchemaTargets(): Promise<string[]> {
-  const charts = await vscode.workspace.findFiles("**/Chart.yaml", "**/{.git,node_modules,vendor,tmp,.werf}/**");
-  const out = new Set<string>();
-
-  for (const chart of charts) {
-     
-    const enabled = await isHelmAppsChart(chart);
-    if (!enabled) {
-      continue;
-    }
-    const chartDir = path.dirname(chart.fsPath);
-    // Root helm-apps values files may have arbitrary names.
-    // Use content-based detection instead of values*.yaml convention.
-     
-    const rootDocs = await findHelmAppsRootDocuments(chartDir);
-    for (const filePath of rootDocs) {
-      out.add(vscode.workspace.asRelativePath(vscode.Uri.file(filePath), false));
-    }
-
-    // Do not auto-attach the strict values.schema.json to werf secret-values files.
-    // They overlay the chart values tree at render time, but encrypted leaf scalars
-    // may intentionally violate plain values leaf types (for example string|null).
-
-    // Include files referenced from values/_include_files are chart-related documents
-    // and should receive the same schema support.
-    const includeFiles = await collectIncludeFilesForChart(chartDir);
-    for (const filePath of includeFiles) {
-      out.add(vscode.workspace.asRelativePath(vscode.Uri.file(filePath), false));
-    }
-  }
-
-  return [...out].sort();
 }
 
 async function isHelmAppsChart(chartYamlUri: vscode.Uri): Promise<boolean> {

@@ -2,7 +2,7 @@
   "name": "helm-apps",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "alvnukov",
   "license": "Apache-2.0",
   "repository": {
@@ -23,7 +23,6 @@
     "onLanguage:yaml",
     "onView:helmAppsValuesStructure",
     "onView:helmAppsWorkbenchActions",
-    "onCommand:helm-apps.configureSchema",
     "onCommand:helm-apps.validateCurrentFile",
     "onCommand:helm-apps.revealValuesNode",
     "onCommand:helm-apps.extractToGlobalInclude",
@@ -55,10 +54,6 @@
       ]
     },
     "commands": [
-      {
-        "command": "helm-apps.configureSchema",
-        "title": "%cmd.configureSchema.title%"
-      },
       {
         "command": "helm-apps.validateCurrentFile",
         "title": "%cmd.validateCurrentFile.title%"
@@ -430,11 +425,6 @@
     "configuration": {
       "title": "%cfg.title%",
       "properties": {
-        "helm-apps.schemaFileMatch": {
-          "type": "array",
-          "default": [],
-          "description": "%cfg.schemaFileMatch.description%"
-        },
         "helm-apps.happPath": {
           "type": "string",
           "default": "happ",
@@ -458,11 +448,6 @@
             "lsp"
           ],
           "description": "%cfg.happLspArgs.description%"
-        },
-        "helm-apps.disableYamlSchemaHover": {
-          "type": "boolean",
-          "default": true,
-          "description": "%cfg.disableYamlSchemaHover.description%"
         },
         "helm-apps.librarySource": {
           "type": "string",
