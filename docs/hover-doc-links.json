@@ -21,6 +21,7 @@
     "docs/reference-values.md#param-apps-configmaps",
     "docs/reference-values.md#param-apps-secrets",
     "docs/reference-values.md#param-apps-sections",
+    "docs/reference-values.md#param-childapps",
     "docs/reference-values.md#param-configfiles",
     "docs/reference-values.md#param-configfilesyaml",
     "docs/reference-values.md#param-containers",
