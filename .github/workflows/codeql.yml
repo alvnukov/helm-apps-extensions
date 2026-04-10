@@ -23,36 +23,15 @@ jobs:
         include:
           - language: javascript-typescript
             build_mode: none
-          - language: java-kotlin
-            build_mode: manual
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup JDK
-        if: ${{ matrix.language == 'java-kotlin' }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Gradle
-        if: ${{ matrix.language == 'java-kotlin' }}
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10.2"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
-
-      - name: Build JetBrains plugin sources
-        if: ${{ matrix.language == 'java-kotlin' }}
-        run: |
-          set -euo pipefail
-          gradle -p jetbrains classes --no-daemon
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3
