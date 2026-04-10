@@ -66,7 +66,17 @@ test("root-key allowlist is non-empty only for app-entry groups", () => {
   const stateless = getAllowedAppRootKeysByGroup("apps-stateless");
   assert.ok(stateless.has("containers"));
   assert.ok(stateless.has("service"));
+  assert.ok(stateless.has("childApps"));
   assert.ok(stateless.has("_include"));
+
+  const stateful = getAllowedAppRootKeysByGroup("apps-stateful");
+  assert.ok(stateful.has("childApps"));
+
+  const jobs = getAllowedAppRootKeysByGroup("apps-jobs");
+  assert.ok(jobs.has("childApps"));
+
+  const cronjobs = getAllowedAppRootKeysByGroup("apps-cronjobs");
+  assert.ok(cronjobs.has("childApps"));
 
   assert.equal(APP_ENTRY_GROUP_SET.has("apps-infra"), false);
   const infra = getAllowedAppRootKeysByGroup("apps-infra");

@@ -86,6 +86,20 @@ const EXTENDED_APP_HELPER_KEYS = [
   "clusterIssuer",
 ];
 
+const WORKLOAD_CHILD_APP_GROUPS = [
+  "apps-certificates",
+  "apps-configmaps",
+  "apps-ingresses",
+  "apps-k8s-manifests",
+  "apps-network-policies",
+  "apps-pvcs",
+  "apps-secrets",
+  "apps-service-accounts",
+  "apps-services",
+] as const;
+
+const WORKLOAD_CHILD_APP_GROUP_SET = new Set<string>(WORKLOAD_CHILD_APP_GROUPS);
+
 const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
   "apps-stateless": {
     purpose: "Runs long-lived stateless app workloads.",
@@ -104,6 +118,7 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
       "minReadySeconds",
       "progressDeadlineSeconds",
       "revisionHistoryLimit",
+      "childApps",
       "extraSpec",
       "podSpecExtra",
     ],
@@ -125,6 +140,7 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
       "volumeClaimTemplates",
       "serviceName",
       "podManagementPolicy",
+      "childApps",
       "selector",
       "minReadySeconds",
       "progressDeadlineSeconds",
@@ -149,6 +165,7 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
       "manualSelector",
       "suspend",
       "ttlSecondsAfterFinished",
+      "childApps",
       "selector",
       "jobTemplateExtraSpec",
       "podSpecExtra",
@@ -174,6 +191,7 @@ const GROUP_APP_GUIDES: Record<string, GroupAppGuide> = {
       "completions",
       "parallelism",
       "ttlSecondsAfterFinished",
+      "childApps",
       "selector",
       "jobTemplateExtraSpec",
       "extraSpec",
@@ -417,6 +435,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     minReadySeconds: { en: "Minimum ready time before pod is treated as available.", ru: "Минимальное время готовности pod перед учетом как available." },
     progressDeadlineSeconds: { en: "Rollout progress timeout before deployment is marked failed.", ru: "Таймаут прогресса rollout перед пометкой деплоя как failed." },
     revisionHistoryLimit: { en: "How many historical rollout revisions to keep.", ru: "Сколько исторических ревизий rollout хранить." },
+    childApps: {
+      en: "Nested child entities rendered together with this workload app.",
+      ru: "Вложенные дочерние сущности, рендеримые вместе с этим workload-приложением.",
+    },
     reloader: { en: "Enables pod auto-restart on ConfigMap/Secret changes via annotations.", ru: "Включает авто-рестарт pod при изменениях ConfigMap/Secret через аннотации." },
     extraSpec: { en: "Raw controller spec patch merged after generated base spec.", ru: "Raw-патч controller spec, мержимый после сгенерированного базового spec." },
     podSpecExtra: { en: "Raw pod template spec patch for advanced pod-level tuning.", ru: "Raw-патч pod template spec для тонкой pod-настройки." },
@@ -435,6 +457,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     updateStrategy: { en: "StatefulSet update strategy settings.", ru: "Настройки стратегии обновления StatefulSet." },
     volumeClaimTemplates: { en: "Per-pod PVC templates for stateful storage.", ru: "Шаблоны per-pod PVC для stateful-хранилища." },
     persistentVolumeClaimRetentionPolicy: { en: "Controls retain/delete behavior of StatefulSet PVCs.", ru: "Управляет режимом retain/delete для PVC StatefulSet." },
+    childApps: {
+      en: "Nested child entities rendered together with this workload app.",
+      ru: "Вложенные дочерние сущности, рендеримые вместе с этим workload-приложением.",
+    },
     extraSpec: { en: "Raw StatefulSet spec patch merged after base generation.", ru: "Raw-патч StatefulSet spec после базовой генерации." },
     podSpecExtra: { en: "Raw pod template patch for StatefulSet pods.", ru: "Raw-патч pod template для pod StatefulSet." },
   },
@@ -446,6 +472,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     completions: { en: "Number of successful pod completions required.", ru: "Количество успешных завершений pod, необходимых для Job." },
     parallelism: { en: "How many Job pods can run simultaneously.", ru: "Сколько pod Job могут выполняться одновременно." },
     ttlSecondsAfterFinished: { en: "Automatic cleanup TTL for finished Job objects.", ru: "TTL автоматической очистки завершенных Job-объектов." },
+    childApps: {
+      en: "Nested child entities rendered together with this workload app.",
+      ru: "Вложенные дочерние сущности, рендеримые вместе с этим workload-приложением.",
+    },
     jobTemplateExtraSpec: { en: "Raw patch for generated Job template spec.", ru: "Raw-патч для сгенерированного Job template spec." },
     suspend: { en: "Pauses Job execution without deleting object.", ru: "Приостанавливает выполнение Job без удаления объекта." },
   },
@@ -457,6 +487,10 @@ const GROUP_COMPONENT_HINTS: Record<string, Record<string, { en: string; ru: str
     completions: { en: "Required successful completions for spawned Jobs.", ru: "Требуемые успешные завершения для создаваемых Job." },
     parallelism: { en: "Parallel pod count for spawned Jobs.", ru: "Параллелизм pod для создаваемых Job." },
     ttlSecondsAfterFinished: { en: "Cleanup TTL for spawned finished Jobs.", ru: "TTL очистки завершенных создаваемых Job." },
+    childApps: {
+      en: "Nested child entities rendered together with this workload app.",
+      ru: "Вложенные дочерние сущности, рендеримые вместе с этим workload-приложением.",
+    },
     jobTemplateExtraSpec: { en: "Raw patch for generated nested Job template.", ru: "Raw-патч для сгенерированного вложенного Job template." },
     containers: { en: "CronJob pod containers.", ru: "Контейнеры pod для CronJob." },
   },
@@ -3538,6 +3572,24 @@ const LAST_KEY_RULES: Record<string, FieldDoc> = {
     ],
     example: "_include_files:\n  - defaults.yaml\n  - profile-prod.yaml\n",
   },
+  childApps: {
+    title: "Workload Child Apps",
+    titleRu: "Дочерние сущности workload-а",
+    summary: "Renders nested child groups under workload app using built-in child-app renderer.",
+    summaryRu: "Рендерит вложенные дочерние группы внутри workload-приложения через встроенный child-app рендерер.",
+    type: "map(group -> map(childApp -> appConfig))",
+    docsLink: "docs/reference-values.md#param-childapps",
+    notes: [
+      `Allowed child groups: ${formatKeyList([...WORKLOAD_CHILD_APP_GROUPS])}.`,
+      "Use this to attach service/config/secret/network-policy and similar resources directly to one workload app.",
+    ],
+    notesRu: [
+      `Разрешённые дочерние группы: ${formatKeyList([...WORKLOAD_CHILD_APP_GROUPS])}.`,
+      "Используйте это, чтобы привязать service/config/secret/network-policy и похожие ресурсы прямо к одному workload-приложению.",
+    ],
+    example:
+      "apps-stateless:\n  api:\n    childApps:\n      apps-services:\n        api:\n          ports: |-\n            - name: http\n              port: 80\n",
+  },
   _preRenderGroupHook: {
     title: "Pre-render Group Hook",
     titleRu: "Pre-render group hook",
@@ -5381,6 +5433,21 @@ function buildCandidateDocPaths(path: string[], context?: FieldDocLookupContext)
     if (base.length >= 4 && WORKLOAD_GROUP_SET.has(base[0]) && base[2] === "service") {
       pushPath(["apps-services", base[1], ...base.slice(3)]);
     }
+    if (base.length >= 4 && WORKLOAD_GROUP_SET.has(base[0]) && base[2] === "childApps") {
+      const childGroup = base[3];
+      if (!childGroup || !WORKLOAD_CHILD_APP_GROUP_SET.has(childGroup)) {
+        return;
+      }
+      if (base.length === 4) {
+        pushPath([childGroup]);
+        return;
+      }
+      const childApp = base[4];
+      if (!childApp) {
+        return;
+      }
+      pushPath([childGroup, childApp, ...base.slice(5)]);
+    }
   };
 
   pushPath(path);
@@ -5994,6 +6061,30 @@ function unknownFieldDoc(path: string[]): FieldDoc | null {
           `Текущий путь: \`${path.join(".")}\`.`,
         ],
         example: `${group}:\n  app-1:\n    service:\n      type: ClusterIP\n      ports: |-\n        - name: http\n          port: 80\n`,
+      };
+    }
+  }
+
+  if (WORKLOAD_GROUP_SET.has(group) && path.length === 4 && path[2] === "childApps") {
+    const childGroup = path[3];
+    if (!WORKLOAD_CHILD_APP_GROUP_SET.has(childGroup)) {
+      return {
+        title: "Field Is Unusual For This Group",
+        titleRu: "Ключ нетипичен для этой группы",
+        summary: `\`${childGroup}\` is not an allowed child group under \`${group}.*.childApps\`.`,
+        summaryRu: `\`${childGroup}\` не является разрешённой дочерней группой под \`${group}.*.childApps\`.`,
+        type: "custom",
+        notes: [
+          `Allowed child groups: ${formatKeyList([...WORKLOAD_CHILD_APP_GROUPS])}.`,
+          "Use `childApps` only for nested built-in non-workload groups.",
+          `Current path: \`${path.join(".")}\`.`,
+        ],
+        notesRu: [
+          `Разрешённые дочерние группы: ${formatKeyList([...WORKLOAD_CHILD_APP_GROUPS])}.`,
+          "Используйте `childApps` только для вложенных встроенных не-workload групп.",
+          `Текущий путь: \`${path.join(".")}\`.`,
+        ],
+        example: `${group}:\n  app-1:\n    childApps:\n      apps-services:\n        app-1:\n          ports: |-\n            - name: http\n              port: 80\n`,
       };
     }
   }

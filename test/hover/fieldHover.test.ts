@@ -326,6 +326,24 @@ test("nested workload service keys reuse standalone service docs", () => {
   assert.equal(doc?.title, "Service ClusterIP");
 });
 
+test("workload childApps key has dedicated doc", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "childApps"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Workload Child Apps");
+});
+
+test("workload childApps nested paths reuse target group docs", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "childApps", "apps-configmaps", "cfg", "data", "APP_MODE"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "ConfigMap Data Entry");
+});
+
+test("unsupported workload childApps group is marked unusual", () => {
+  const doc = findFieldDoc(["apps-stateless", "api", "childApps", "apps-stateful"]);
+  assert.ok(doc);
+  assert.equal(doc?.title, "Field Is Unusual For This Group");
+});
+
 test("unsupported nested workload service key is marked unusual", () => {
   const doc = findFieldDoc(["apps-stateless", "api", "service", "metadata"]);
   assert.ok(doc);

@@ -182,6 +182,7 @@ const DEPLOYMENT_WORKLOAD_ROOT_KEYS = [
   "minReadySeconds",
   "progressDeadlineSeconds",
   "revisionHistoryLimit",
+  "childApps",
   "extraSpec",
   ...WORKLOAD_POD_TEMPLATE_ROOT_KEYS,
 ] as const;
@@ -204,6 +205,7 @@ const STATEFUL_WORKLOAD_ROOT_KEYS = [
   "serviceName",
   "volumeClaimTemplates",
   "persistentVolumeClaimRetentionPolicy",
+  "childApps",
   "updateStrategy",
   "extraSpec",
   ...WORKLOAD_POD_TEMPLATE_ROOT_KEYS,
@@ -225,6 +227,7 @@ const JOB_TEMPLATE_ROOT_KEYS = [
   "suspend",
   "completionMode",
   "ttlSecondsAfterFinished",
+  "childApps",
   "jobTemplateExtraSpec",
   "extraSpec",
   ...WORKLOAD_POD_TEMPLATE_ROOT_KEYS,
